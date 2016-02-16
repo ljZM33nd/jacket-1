@@ -1138,6 +1138,9 @@ class AwsEc2Driver(driver.ComputeDriver):
         cmd6 = "sudo iscsiadm -m node -T %s -p %s --op delete" % (target_iqn, target_portal)
         cmd6_status, cmd6_out, cmd6_err = ssh_client.execute(cmd6)
         LOG.debug("sudo cmd6 info status=%s ,out=%s, err=%s " % (cmd6_status, cmd6_out, cmd6_err))
+        
+    def detach_interface(self, instance, vif):
+        pass
 
     def detach_volume(self, connection_info, instance, mountpoint,
                       encryption=None):
@@ -1168,8 +1171,20 @@ class AwsEc2Driver(driver.ComputeDriver):
 
         # 2.dettach
         self.compute_adapter.detach_volume(provider_volume)
-       
-        pass
+        time.sleep(3)
+        retry_time = 60
+        provider_volume=self._get_provider_volume(volume_id)
+        while retry_time > 0:
+            if provider_volume and \
+               provider_volume.state == StorageVolumeState.AVAILABLE and \
+               provider_volume.extra.get('attachment_status') is None:
+                break
+            else:
+                time.sleep(2)
+                provider_volume=self._get_provider_volume(volume_id)
+                retry_time = retry_time-1
+    
+        
 
     def get_available_resource(self, nodename):
         """Retrieve resource info.
