@@ -31,7 +31,7 @@ from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.openstack.common import uuidutils
 from nova.virt import driver
-from nova.virt.vcloudapi import network_utils
+from jacket.nova.virt.vcloudapi import network_utils
 
 LOG = logging.getLogger(__name__)
 

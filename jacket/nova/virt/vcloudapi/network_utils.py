@@ -20,7 +20,7 @@ from oslo.vmware import exceptions as vexc
 from nova import exception
 from nova.i18n import _
 from nova.openstack.common import log as logging
-from nova.virt.vcloudapi import vim_util
+from jacket.nova.virt.vcloudapi import vim_util
 
 LOG = logging.getLogger(__name__)
 

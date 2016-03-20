@@ -21,7 +21,7 @@ from hypernode_installer import HyperNodeInstaller
 from oslo.messaging.exceptions import MessagingTimeout
 from oslo.messaging.rpc.client import RemoteError
 from oslo.messaging.exceptions import MessageDeliveryFailure
-from nova.virt.aws.hypernode_installer import HyperNodeAPIException
+from jacket.nova.virt.aws.hypernode_installer import HyperNodeAPIException
 
 LOG = logging.getLogger(__name__)
 

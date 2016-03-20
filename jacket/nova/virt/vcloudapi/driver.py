@@ -46,13 +46,13 @@ from nova.openstack.common import fileutils as fileutils
 from nova.virt import driver
 from nova.virt import diagnostics
 from nova.virt import virtapi
-from nova.virt.vcloudapi import vcenter_utils
-from nova.virt.vcloudapi import vcloud_network_utils
-from nova.virt.vcloudapi import util
-from nova.virt.vcloudapi.vcloudair import *
-from nova.virt.vcloudapi.vcloudair import VCloudAPISession as VCASession
+from jacket.nova.virt.vcloudapi import vcenter_utils
+from jacket.nova.virt.vcloudapi import vcloud_network_utils
+from jacket.nova.virt.vcloudapi import util
+from jacket.nova.virt.vcloudapi.vcloudair import *
+from jacket.nova.virt.vcloudapi.vcloudair import VCloudAPISession as VCASession
 from nova.volume.cinder import API as cinder_api
-from nova.virt.vcloudapi import vcloud_task_states
+from jacket.nova.virt.vcloudapi import vcloud_task_states
 from nova import context
 
 vcloudapi_opts = [

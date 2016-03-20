@@ -31,12 +31,14 @@ from nova import image
 from nova.openstack.common import log as logging
 from nova.openstack.common import fileutils as fileutils
 from nova.i18n import _
-from nova.virt.hybrid.common import fake_driver
-from nova.virt.hybrid.common import common_tools
-from nova.virt.hybrid.vcloud import hyper_agent_api
-from nova.virt.hybrid.vcloud import util
-from nova.virt.hybrid.vcloud.vcloud import VCLOUD_STATUS
-from nova.virt.hybrid.vcloud.vcloud_client import VCloudClient
+
+from jacket.nova.virt.hybrid.common import fake_driver
+from jacket.nova.virt.hybrid.common import common_tools
+
+import hyper_agent_api
+import util
+from vcloud import VCLOUD_STATUS
+from vcloud_client import VCloudClient
 from nova.volume.cinder import API as cinder_api
 from nova.network import neutronv2
 

@@ -26,13 +26,12 @@ from nova.network import model as network_model
 from nova.network import neutronv2
 from nova.openstack.common import log as logging
 from nova.virt import virtapi
-from nova.virt.vcloudapi.vcloudair import VCloudAPISession as VCASession
+from jacket.nova.virt.vcloudapi.vcloudair import VCloudAPISession as VCASession
 from nova.virt import driver
-from nova.virt.vcloudapi import driver as vcloud_driver
-from nova.virt.vcloudapi.vcenter_utils import BaseAPI
-from nova.virt.vtep import network_api
-from nova.virt.vtep import driver
-from nova.virt.vtep.driver import ProviderPort, VtepDriver
+from jacket.nova.virt.vcloudapi import driver as vcloud_driver
+from jacket.nova.virt.vcloudapi.vcenter_utils import BaseAPI
+
+from jacket.nova.virt.vtep.driver import ProviderPort, VtepDriver
 
 
 CONF = cfg.CONF

@@ -18,16 +18,14 @@ Nova compute driver support fo vtep in vm through openvswitch
 
 from oslo.config import cfg
 
-from nova import exception
-from nova import network
-from nova.i18n import _, _LI, _LW
+
 from nova import exception
 from nova.network import model as network_model
-from nova.network import neutronv2
+
 from nova.openstack.common import log as logging
-from nova.virt import virtapi
+
 from nova.virt import driver
-from nova.virt.vtep import network_api
+from jacket.nova.virt.vtep import network_api
 
 
 vtep_opts = [
