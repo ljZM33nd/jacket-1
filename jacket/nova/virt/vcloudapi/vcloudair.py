@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from nova.virt.vcloudapi import exceptions
+from jacket.nova.virt.vcloudapi import exceptions
 from oslo.config import cfg
 from oslo.utils import excutils
 from oslo.vmware.common import loopingcall

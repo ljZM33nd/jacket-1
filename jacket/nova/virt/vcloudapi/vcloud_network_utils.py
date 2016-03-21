@@ -24,15 +24,15 @@ from oslo.vmware import api
 from oslo.vmware import vim
 import suds
 
-from nova.virt.vcloudapi import exceptions
+from jacket.nova.virt.vcloudapi import exceptions
 from nova import utils
 from nova.i18n import _, _LI, _LW
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova.openstack.common import uuidutils
 from nova.virt import driver
-from nova.virt.vcloudapi import vcenter_utils
-from nova.virt.vcloudapi import network_utils
+from jacket.nova.virt.vcloudapi import vcenter_utils
+from jacket.nova.virt.vcloudapi import network_utils
 from nova.network import linux_net
 from nova.network import model as network_model
 

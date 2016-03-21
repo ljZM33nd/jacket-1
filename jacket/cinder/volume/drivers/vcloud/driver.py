@@ -21,19 +21,13 @@ from cinder.openstack.common import log as logging
 # from cinder.openstack.common import uuidutils
 from cinder.volume import driver
 from cinder.volume import volume_types
-from cinder.volume.drivers.vcloud import util
-from cinder.volume.drivers.vcloud.vcloudair import *
-from cinder.volume.drivers.vcloud.vcloudair import VCloudAPISession as VCASession
+
+from jacket.cinder.volume.drivers.vcloud import util
+from jacket.cinder.volume.drivers.vcloud.vcloudair import *
+from jacket.cinder.volume.drivers.vcloud.vcloudair import VCloudAPISession as VCASession
 from oslo.utils import units
-from cinder.volume.drivers.vcloud import sshutils as sshclient
+from jacket.cinder.volume.drivers.vcloud import sshutils as sshclient
 from keystoneclient.v2_0 import client as kc
-# from cinder.volume.drivers.vmware import api
-# from cinder.volume.drivers.vmware import datastore as hub
-# from cinder.volume.drivers.vmware import error_util
-# from cinder.volume.drivers.vmware import vim
-# from cinder.volume.drivers.vmware import vim_util
-# from cinder.volume.drivers.vmware import vmware_images
-# from cinder.volume.drivers.vmware import volumeops
 
 vcloudapi_opts = [
 

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from cinder import exception
-from cinder.volume.drivers.vcloud import exceptions
+from jacket.cinder.volume.drivers.vcloud import exceptions
 from oslo.config import cfg
 from oslo.vmware.common import loopingcall
 from oslo.utils import excutils

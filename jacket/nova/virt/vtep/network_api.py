@@ -19,26 +19,14 @@ import time
 import uuid
 from oslo.config import cfg
 
-from nova import conductor
+
 from nova import exception
-from nova import objects
-from nova.api.openstack import extensions
-from nova.compute import flavors
-from nova.compute import utils as compute_utils
 from nova.network import model as network_model
-from nova.network import base_api
 from nova.network import neutronv2
 from nova.network.neutronv2 import api
-from nova.network.neutronv2 import constants
-from nova.network.security_group import openstack_driver
 from nova.i18n import _, _LE, _LW
 from nova.openstack.common import excutils
-from nova.openstack.common import lockutils
 from nova.openstack.common import log as logging
-from nova.openstack.common import uuidutils
-from nova.pci import pci_manager
-from nova.pci import pci_request
-from nova.pci import pci_whitelist
 from neutronclient.common import exceptions as neutron_client_exc
 
 CONF = cfg.CONF
