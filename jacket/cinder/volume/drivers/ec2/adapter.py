@@ -762,7 +762,10 @@ class Ec2Adapter(EC2NodeDriver):
                 params['NetworkInterface.%d.SecurityGroupId' %(index)]=network_interface.security_groups
       
         return params
-    
+
+    def create_volume_from_snapshot(self, size, name, location, provider_snapshot):
+        return self.create_volume(size, name, location, snapshot=provider_snapshot)
+
     @RetryDecorator(max_retry_count= MAX_RETRY_COUNT,inc_sleep_time=5,max_sleep_time=60,
                         exceptions=(Exception,ssl.SSLError))
     def create_volume(self, size, name, location=None, snapshot=None,

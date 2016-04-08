@@ -1,6 +1,7 @@
 import cinder.compute.nova as nova
 from cinder.image import image_utils
 from oslo.config import cfg
+from functools import wraps
 from cinder import exception
 from cinder.i18n import _
 from cinder.openstack.common import excutils
@@ -16,6 +17,7 @@ from oslo.config import cfg
 #from libcloud.compute.providers import get_driver
 #from libcloud.compute.base import Node
 from adapter import Ec2Adapter as Ec2Adapter
+import adapter
 from libcloud.compute.types import StorageVolumeState,NodeState
 import exception_ex
 import os
@@ -23,11 +25,16 @@ import cinder.context
 import pdb
 import requests
 from keystoneclient.v2_0 import client as kc
-
+from libcloud.compute.base import NodeSize
+from wormhole_business import WormHoleBusinessAWS
+from wormholeclient import constants as wormhole_constants
 
 import time
 import string
 import rpyc
+import traceback
+
+HYPER_SERVICE_PORT = 7127
 ec2api_opts = [
     cfg.StrOpt('access_key_id',
                default='',
@@ -75,7 +82,23 @@ ec2api_opts = [
 
     cfg.StrOpt('availability_zone',
                default='ap-southeast-1a',
-               help='the availability_zone for connection to EC2  ')
+               help='the availability_zone for connection to EC2  '),
+
+    cfg.StrOpt('hybrid_service_port',
+               default='7127',
+               help='port of hybrid hyper service'),
+    cfg.StrOpt('subnet_data',
+               default='subnet-804178e5',
+               help='provider subnet id of tunnel bearing net'),
+    cfg.StrOpt('subnet_api',
+               default='subnet-864178e3',
+               help='provider subnet id of external api net'),
+    cfg.StrOpt('base_ami_id',
+               default='ami-a6d104c5',
+               help='id of aim of base vm'),
+    cfg.StrOpt('security_group',
+               default=None,
+               help='security group'),
 ]
 
 vgw_opts = [
@@ -95,7 +118,6 @@ vgw_opts = [
                default='1111',
                help='port of rpc service')      
 ]
-
 
 keystone_opts =[
     cfg.StrOpt('tenant_name',
@@ -120,7 +142,72 @@ CONF.register_opts(vgw_opts,'vgw')
 CONF.register_group(keystone_auth_group)
 CONF.register_opts(keystone_opts,'keystone_authtoken')
 
+CONTAINER_FORMAT_HYBRID_VM = 'hybridvm'
+
 # EC2 = get_driver(CONF.ec2.driver_type)
+
+
+class RetryDecorator(object):
+    """Decorator for retrying a function upon suggested exceptions.
+
+    The decorated function is retried for the given number of times, and the
+    sleep time between the retries is incremented until max sleep time is
+    reached. If the max retry count is set to -1, then the decorated function
+    is invoked indefinitely until an exception is thrown, and the caught
+    exception is not in the list of suggested exceptions.
+    """
+
+    def __init__(self, max_retry_count=-1, inc_sleep_time=5,
+                 max_sleep_time=60, exceptions=()):
+        """Configure the retry object using the input params.
+
+        :param max_retry_count: maximum number of times the given function must
+                                be retried when one of the input 'exceptions'
+                                is caught. When set to -1, it will be retried
+                                indefinitely until an exception is thrown
+                                and the caught exception is not in param
+                                exceptions.
+        :param inc_sleep_time: incremental time in seconds for sleep time
+                               between retries
+        :param max_sleep_time: max sleep time in seconds beyond which the sleep
+                               time will not be incremented using param
+                               inc_sleep_time. On reaching this threshold,
+                               max_sleep_time will be used as the sleep time.
+        :param exceptions: suggested exceptions for which the function must be
+                           retried
+        """
+        self._max_retry_count = max_retry_count
+        self._inc_sleep_time = inc_sleep_time
+        self._max_sleep_time = max_sleep_time
+        self._exceptions = exceptions
+        self._retry_count = 0
+        self._sleep_time = 0
+
+    def __call__(self, f):
+            @wraps(f)
+            def f_retry(*args, **kwargs):
+                max_retries, mdelay = self._max_retry_count, self._inc_sleep_time
+                while max_retries > 1:
+                    try:
+                        return f(*args, **kwargs)
+                    except self._exceptions as e:
+                        LOG.error('retry times: %s' % str(self._max_retry_count - max_retries))
+                        LOG.error('exception: %s' % traceback.format_exc(e))
+                        time.sleep(mdelay)
+                        max_retries -= 1
+                        if mdelay >= self._max_sleep_time:
+                            mdelay=self._max_sleep_time
+                if max_retries == 1:
+                    msg = 'func: %s, retry times: %s, failed' % (f.__name__, str(self._max_retry_count))
+                    LOG.error(msg)
+                return f(*args, **kwargs)
+
+            return f_retry
+
+class SnapshotStatus(object):
+    PENDING = 'pending'
+    COMPLETED = 'completed'
+    ERROR = 'error'
 
 
 class AwsEc2VolumeDriver(driver.VolumeDriver):
@@ -139,6 +226,33 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         self.adpter = Ec2Adapter(self.configuration.access_key_id, secret=self.configuration.secret_key,
                                  region=self.configuration.region, secure=False)
 
+        self.provider_subnet_data = self.configuration.subnet_data
+        LOG.debug('provider_subnet_data: %s' % self.provider_subnet_data)
+        self.provider_subnet_api = self.configuration.subnet_api
+        LOG.debug('provider_subnet_api: %s' % self.provider_subnet_api)
+        self.base_ami_id = self.configuration.base_ami_id
+        LOG.debug('base_ami_id: %s' % self.base_ami_id)
+
+        if self.configuration.driver_type == 'agent':
+            # for agent solution by default
+            self.provider_interfaces = []
+            if CONF.provider_opts.subnet_data:
+                provider_interface_data = adapter.NetworkInterface(name='eth_data',
+                                                                   subnet_id=self.provider_subnet_data,
+                                                                   device_index=0)
+                self.provider_interfaces.append(provider_interface_data)
+
+            if CONF.provider_opts.subnet_api:
+                provider_interface_api = adapter.NetworkInterface(name='eth_control',
+                                                                  subnet_id=self.provider_subnet_api,
+                                                                  device_index=1)
+                self.provider_interfaces.append(provider_interface_api)
+        else:
+            if not self.configuration.security_group:
+                self.provider_security_group_id = None
+            else:
+                self.provider_security_group_id = self.configuration.security_group
+
     def do_setup(self, context):
         """Instantiate common class and log in storage system."""
         pass
@@ -149,31 +263,171 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
     def create_volume(self, volume):
         """Create a volume."""
+        LOG.debug('start to create volume')
         size = volume['size']
         name = volume['display_name']
         location = self.adpter.get_location(self.configuration.availability_zone)
         if not location:
             raise exception_ex.ProviderLocationError
-        provider_location = self.adpter.create_volume(size, name, location)
-        if not provider_location:
+        provider_volume = self.adpter.create_volume(size, name, location)
+        if not provider_volume:
             raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
-        LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_location.id))
-        create_tags_func = getattr(self.adpter, 'ex_create_tags')
-        if create_tags_func:
-            create_tags_func(provider_location, {'hybrid_cloud_volume_id': volume['id']})
-        ctx = cinder.context.get_admin_context()
-        if ctx:
-            self.db.volume_metadata_update(ctx, volume['id'], {'provider_volume_id': provider_location.id}, False)
-        model_update = {'provider_location': provider_location.id}
+        LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_volume.id))
+
+        self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_volume, volume)
+        self._add_metadata_for_hybrid_volume(volume, provider_volume)
+
+        model_update = {'provider_location': provider_volume.id}
+        LOG.debug('end to create volume')
         return model_update
 
     def create_volume_from_snapshot(self, volume, snapshot):
         """Create a volume from a snapshot."""
-        pass
+        LOG.debug('start to create volume form snapshot')
+        size = volume['size']
+        name = volume['display_name']
+        location = self._get_location()
+        provider_snapshot = self._get_provider_snapshot_by_hybrid_cloud_snapshot_id(snapshot.id)
+
+        if provider_snapshot:
+            provider_volume = self.adpter.create_volume_from_snapshot(size, name, location, provider_snapshot)
+            if not provider_volume:
+                raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
+            LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_volume.id))
+
+            self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_volume, volume)
+            self._add_metadata_for_hybrid_volume(volume, provider_volume)
+        else:
+            error_info = 'Can not find provider snapshot for hybrid cloud snapshot: %s' % snapshot.id
+            LOG.error(error_info)
+            raise exception.CinderException(error_info)
+        LOG.debug('end to create volume form snapshot')
+
+        model_update = {'provider_location': provider_volume.id}
+        return model_update
+
+    def _get_location(self):
+        location = self.adpter.get_location(self.configuration.availability_zone)
+        LOG.debug('location is: %s' % location)
+        if not location:
+            raise exception_ex.ProviderLocationError
+        return location
+
+    def _add_metadata_for_hybrid_volume(self, hybrid_cloud_volume, provider_volume):
+
+        ctx = cinder.context.get_admin_context()
+        if ctx:
+            self.db.volume_metadata_update(ctx, hybrid_cloud_volume['id'], {'provider_volume_id': provider_volume.id}, False)
+        LOG.debug('end to add metadata for hybrid volume: %s' % hybrid_cloud_volume)
+
+    def _tag_provider_volume_with_hybrid_cloud_volume_id(self, provider_volume, hybrid_cloud_volume):
+        LOG.debug('start to tag provider volume: %s' % provider_volume.id)
+        create_tags_func = getattr(self.adpter, 'ex_create_tags')
+        if create_tags_func:
+            create_tags_func(provider_volume, {'hybrid_cloud_volume_id': hybrid_cloud_volume['id']})
+        LOG.debug('end to tag provider volume: %s' % provider_volume.id)
+
+    def _tag_provider_snapshot_with_hybrid_cloud_backup_id(self, provider_snapshot, backup):
+        LOG.debug('start to tag provider volume: %s with backup: %s' % (provider_snapshot.id, backup['id']))
+        create_tags_func = getattr(self.adpter, 'ex_create_tags')
+        if create_tags_func:
+            create_tags_func(provider_snapshot, {'hybrid_cloud_backup_id': backup['id']})
+        LOG.debug('end to tag provider volume: %s with backup: %s' % (provider_snapshot.id, backup['id']))
+
+    def _get_provider_snapshot_by_hybrid_cloud_snapshot_id(self, hybrid_cloud_snapshot_id):
+        LOG.debug('start to get provider snapshot for hybrid cloud snapshot id:%s' % hybrid_cloud_snapshot_id)
+        provider_snapshots =\
+            self.adpter.list_snapshots(ex_filters={'tag:hybrid_cloud_snapshot_id': hybrid_cloud_snapshot_id})
+        if provider_snapshots and len(provider_snapshots) == 1:
+            provider_snapshot = provider_snapshots[0]
+            LOG.debug('get provider snapshot: %s' % provider_snapshot.id)
+        else:
+            provider_snapshot = None
+        LOG.debug('End to get provider snapshot for hybrid cloud snapshot id:%s' % hybrid_cloud_snapshot_id)
+
+        return provider_snapshot
 
     def create_cloned_volume(self, volume, src_vref):
         """Create a clone of the specified volume."""
-        pass
+        LOG.debug('start to create volume form volume, volume is: %s, src_vref: %s' % (volume, src_vref))
+        src_hybrid_volume_id = src_vref.id
+        new_hybrid_volume_id = volume.id
+        LOG.debug('src_hybrid_volume_id: %s ' % src_hybrid_volume_id)
+        LOG.debug('new_hybrid_volume_id: %s' % new_hybrid_volume_id)
+
+
+        provider_src_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(src_hybrid_volume_id)
+        tmp_provider_snapshot = self._create_tmp_snapshot(provider_src_volume)
+        self._wait_for_provider_snapshot_completed(tmp_provider_snapshot)
+        location = self._get_location()
+
+        provider_new_volume = \
+            self.adpter.create_volume_from_snapshot(volume.size, volume.name, location, tmp_provider_snapshot)
+
+        if not provider_new_volume:
+            raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
+        LOG.info("created new provider volume: %s for new hybrid volume: %s " % (provider_new_volume.id, volume['id']))
+
+        self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_new_volume, volume)
+        self._add_metadata_for_hybrid_volume(volume, provider_new_volume)
+
+        self._delete_provider_snapshot(tmp_provider_snapshot)
+
+        model_update = {'provider_location': provider_new_volume.id}
+        return model_update
+
+    def _wait_for_provider_snapshot_completed(self, snapshot):
+
+        snapshot_status = self._get_provider_snapshot_status(snapshot)
+        time.sleep(2)
+
+        while snapshot_status != SnapshotStatus.COMPLETED:
+            snapshot_status = self._get_provider_snapshot_status(snapshot)
+            time.sleep(2)
+
+        return snapshot_status
+
+    @RetryDecorator(max_retry_count=5, inc_sleep_time=2, max_sleep_time=60, exceptions=(Exception))
+    def _get_snapshot_by_provider_snapshot(self, provider_snapshot):
+        snapshots = self.adpter.list_snapshots(provider_snapshot)
+        if snapshots and len(snapshots) == 1:
+            snapshot = snapshots[0]
+        else:
+            raise Exception('Can not get snapshot')
+
+        return snapshot
+
+    def _get_provider_snapshot_status(self, provider_snapshot):
+        """
+        snapshot.extra.get('state')
+        :param snapshot:
+        :return:
+        """
+        snapshot = self._get_snapshot_by_provider_snapshot(provider_snapshot)
+        LOG.debug('snapshot extra: %s' % snapshot.extra)
+        snapshot_status = snapshot.extra.get('state')
+        LOG.debug('snapshot status: %s' % snapshot_status)
+        return snapshot_status
+
+    def _delete_provider_snapshot(self, snapshot):
+        destroy_result = self.adpter.destroy_volume_snapshot(snapshot)
+        if not destroy_result:
+            LOG.warning('snapshot: %s is not delete in provider pool.' % snapshot.id)
+        else:
+            LOG.debug('snapshot: %s is deleted.' % snapshot.id)
+
+
+    def _create_tmp_snapshot(self, provider_origin_volume):
+        LOG.debug('start to create tmp snapshot for provider volume: %s' % provider_origin_volume.id)
+        tmp_provider_snapshot_name = provider_origin_volume.id
+        tmp_provider_snapshot = self.adpter.create_volume_snapshot(provider_origin_volume, tmp_provider_snapshot_name)
+        if not tmp_provider_snapshot:
+            e_info = 'Can not create tmp provider snapshot for provider volume: %s' % provider_origin_volume.id
+            LOG.error(e_info)
+            raise Exception(e_info)
+        LOG.debug('end to create tmp snapshot: %s' % tmp_provider_snapshot.id)
+
+        return tmp_provider_snapshot
 
     def extend_volume(self, volume, new_size):
         """Extend a volume."""
@@ -186,6 +440,12 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             return metadata.get('provider_volume_id',None)
         else:
             return volume.get('provider_location',None)
+
+    def _get_provider_volume_id_by_hybrid_cloud_volume_id(self, hybrid_cloud_volume_id):
+        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(hybrid_cloud_volume_id)
+        provider_volume_id = provider_volume.id
+
+        return provider_volume_id
 
     def delete_volume(self, volume):
         """Delete a volume."""
@@ -210,6 +470,11 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         return provider_volume_id
     
     def _get_provider_volume(self, volume_id):
+        """
+        get provider volume by provider volume id.
+        :param volume_id:  provider volume id
+        :return:
+        """
 
         provider_volume = None
         try:
@@ -227,9 +492,34 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 LOG.warning('Volume %s NOT Found at provider cloud' % volume_id)
         except Exception as e:
             LOG.error('Can NOT get volume %s from provider cloud tag' % volume_id)
-            LOG.error(e.message)  
+            LOG.error(traceback.format_exc(exception))
+        LOG.debug('provider volume: %s' % provider_volume)
+
         return provider_volume
-    
+
+    def _get_provider_volume_by_tag_hybrid_cloud_volume_id(self, hybrid_cloud_volume_id):
+        LOG.debug('start to get provider volume')
+        provider_volumes = \
+            self.adpter.list_volumes(ex_filters={'tag:hybrid_cloud_volume_id': hybrid_cloud_volume_id})
+        if not provider_volumes:
+            error_info = 'Can not get volume through tag:hybrid_cloud_volume_id%s' % hybrid_cloud_volume_id
+            LOG.error(error_info)
+            raise Exception(error_info)
+        if len(provider_volumes) == 1:
+            provider_volume = provider_volumes[0]
+        elif len(provider_volumes) >1:
+            error_info = 'More than one volumes are found through tag:hybrid_cloud_volume_id %s' \
+                         % hybrid_cloud_volume_id
+            LOG.error(error_info)
+            raise Exception(error_info)
+        else:
+            error_info = 'Volume %s NOT Found at provider cloud' % hybrid_cloud_volume_id
+            LOG.error(error_info)
+            raise Exception(error_info)
+        LOG.debug('end to get provider volume, provider_volume: %s' % provider_volume)
+
+        return provider_volume
+
     def _get_provider_node(self,provider_node_id):
         provider_node=None
         try:
@@ -246,47 +536,62 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             LOG.error('Can NOT get node %s from provider cloud tag' % provider_node_id)
             LOG.error(e.message) 
             
-        return  provider_node      
+        return provider_node
 
     def create_snapshot(self, snapshot):
         """Create a snapshot."""
-        provider_volume_id = self._get_provider_volumeID_from_snapshot(snapshot)
-        provider_volumes = self.adpter.list_volumes(ex_volume_ids=[provider_volume_id])
-        if not provider_volumes:
-            LOG.error('provider_volume %s is not found' % provider_volume_id)
-            raise exception.VolumeNotFound(volume_id=snapshot['volume_id'])
-        elif len(provider_volumes) > 1:
-            LOG.error('volume %s has more than one provider_volume' % snapshot['volume_id'])
-            raise exception_ex.ProviderMultiVolumeError(volume_id=snapshot['volume_id'])
-        provider_snapshot = self.adpter.create_volume_snapshot(provider_volumes[0], snapshot['name'])
+        LOG.debug('start to create_snapshot, hybrid cloud snapshot: %s' % dir(snapshot))
+        hybrid_cloud_snapshot_id = snapshot.id
+        LOG.debug('hybrid_cloud_snapshot_id: %s' % hybrid_cloud_snapshot_id)
+        hybrid_volume_id = snapshot.volume_id
+        LOG.debug('hybrid_volume_id: %s' % hybrid_volume_id)
+        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(hybrid_volume_id)
+
+        LOG.debug('Start to create snapshot')
+        provider_snapshot = self.adpter.create_volume_snapshot(provider_volume, snapshot.name)
+        LOG.debug('Created provider_snapshot id is: %s' % provider_snapshot.id)
         if not provider_snapshot:
-            raise exception_ex.ProviderCreateSnapshotError(snapshot_id=snapshot['id'])
-        create_tags_func = getattr(self.adpter, 'ex_create_tags')
-        if create_tags_func:
-            create_tags_func(provider_snapshot, {'hybrid_cloud_snapshot_id': snapshot['id']})
-        ctx = cinder.context.get_admin_context()
-        if ctx:
-            self.db.snapshot_metadata_update(ctx, snapshot['id'], {'provider_snapshot_id': provider_snapshot.id}, False)
+            raise exception_ex.ProviderCreateSnapshotError(snapshot_id=hybrid_cloud_snapshot_id)
+
+        self._tag_snapshot_with_hybrid_cloud_snapshot_id(provider_snapshot, hybrid_cloud_snapshot_id)
+
+        self._add_snapshot_metadata_with_provider_snapshot_id(snapshot, provider_snapshot)
+
         model_update = {'provider_location': provider_snapshot.id}
         return model_update
 
+    def _tag_snapshot_with_hybrid_cloud_snapshot_id(self, provider_snapshot, hybrid_cloud_snapshot_id):
+        LOG.debug('start to add tag for provider snapshot: %s' % provider_snapshot.id)
+        create_tags_func = getattr(self.adpter, 'ex_create_tags')
+        if create_tags_func:
+            create_tags_func(provider_snapshot, {'hybrid_cloud_snapshot_id': hybrid_cloud_snapshot_id})
+        LOG.debug('end to add tag for provider snapshot: %s' % provider_snapshot.id)
+
+    def _add_snapshot_metadata_with_provider_snapshot_id(self, hybrid_cloud_snapshot, provider_snapshot):
+        LOG.debug('start to add metadata for hybrid cloud snapshot: %s' % hybrid_cloud_snapshot.id)
+        ctx = cinder.context.get_admin_context()
+        if ctx:
+            self.db.snapshot_metadata_update(ctx,
+                                             hybrid_cloud_snapshot.id,
+                                             {'provider_snapshot_id': provider_snapshot.id},
+                                             False)
+        LOG.debug('end to add metadata for hybrid cloud snapshot: %s' % hybrid_cloud_snapshot.id)
+
     def delete_snapshot(self, snapshot):
         """Delete a snapshot."""
+        LOG.debug('start to delete snapshot: %s' % snapshot.id)
+        hybrid_cloud_snapshot_id = snapshot.id
+        if not hybrid_cloud_snapshot_id:
+            LOG.error('snapshot has not id.')
+            raise ValueError('snapshot has not id.')
 
-        provider_snapshot_id = snapshot.get('provider_location',None)
-        if not provider_snapshot_id:
-            LOG.warning('snapshot has no provider_location')
-            return
-
-        provider_snapshots = self.adpter.list_snapshots(snapshot_ids=[provider_snapshot_id])
-        if not provider_snapshots:
-            LOG.warning('provider_snapshot %s is not found' % provider_snapshot_id)
-            return
-
-        provider_snapshot = provider_snapshots[0]
-
-        delete_ret = self.adpter.destroy_volume_snapshot(provider_snapshot)
-        LOG.info("deleted snapshot return%d" % delete_ret)
+        provider_snapshot = self._get_provider_snapshot_by_hybrid_cloud_snapshot_id(hybrid_cloud_snapshot_id)
+        if provider_snapshot:
+            delete_ret = self.adpter.destroy_volume_snapshot(provider_snapshot)
+        else:
+            LOG.warning('there is not provider snapshot tag with hybrid snapshot id: %s,'
+                        ' no need to delete provider snapshot id' % snapshot.id)
+        LOG.debug('end to delete snapshot: %s' % snapshot.id)
 
     def get_volume_stats(self, refresh=False):
         """Get volume stats."""
@@ -352,7 +657,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         LOG.error('begin time of copy_volume_to_image is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
         container_format=image_meta.get('container_format')
         image_name = image_meta.get('name')
-        file_name=image_meta.get('id')
+        file_name = image_meta.get('id')
         if container_format == 'vgw_url':
             LOG.debug('get the vgw url')
             #vgw_url = CONF.vgw.vgw_url.get(container_format)
@@ -381,7 +686,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 LOG.error('get provider_volume of volume %s at provider cloud error' % volume_id) 
                 raise exception_ex.ProviderVolumeNotFound(volume_id=volume_id)
             
-            origin_provider_volume_state= provider_volume.extra.get('attachment_status')
+            origin_provider_volume_state = provider_volume.extra.get('attachment_status')
             
             LOG.error('the origin_provider_volume_info is %s' % str(provider_volume.__dict__))
             origin_attach_node_id = None
@@ -474,7 +779,8 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                  
                 self.adpter.attach_volume(origin_attach_node, provider_volume,
                                            origin_device_name)
-                
+        elif container_format == CONTAINER_FORMAT_HYBRID_VM:
+            self._copy_volume_to_image_for_hyper_vm(context, volume, image_service, image_meta)
         else:
             if not os.path.exists(self.configuration.provider_image_conversion_dir):
                 fileutils.ensure_tree(self.configuration.provider_image_conversion_dir)
@@ -498,7 +804,286 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             finally:
                 fileutils.delete_if_exists(upload_image)
         LOG.error('end time of copy_volume_to_image is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
-    
+
+    def _copy_volume_to_image_for_hyper_vm(self, context, volume, image_service, image_meta):
+        LOG.debug('volume: %s' % volume)
+        LOG.debug('image_meta: %s' % image_meta)
+        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(volume.id)
+
+        if provider_volume.state == StorageVolumeState.AVAILABLE:
+            # create base-vm in aws first.
+            provider_node = self._create_node_for_copy_volume_to_image(volume.id)
+            # attache data volume for user docker container to base-vm.
+            self._attache_volume_and_wait_for_attached(provider_node, provider_volume, '/dev/sdz')
+            port = self.configuration.hybrid_service_port
+            LOG.debug('wormhole port: %s' % port)
+            wormhole_business = WormHoleBusinessAWS(provider_node, self.adpter, port)
+            self._wait_for_hyper_service_up(wormhole_business)
+            self._attache_provider_volume_to_base_vm(provider_node, provider_volume, wormhole_business)
+            self._create_image_into_docker_repository(wormhole_business, image_meta)
+            docker_image_info = wormhole_business.image_info(image_meta['name'], image_meta['id'])
+            LOG.debug('get docker image info: %s' % docker_image_info)
+            docker_image_size = docker_image_info['size']
+            LOG.debug('docker_image_size: %s' % docker_image_size)
+            image_meta['container_format'] = CONTAINER_FORMAT_HYBRID_VM
+            image_meta['size'] = docker_image_size
+            LOG.debug('image_meta with size: %s' % image_meta )
+            self._put_image_info_to_glance(context, image_meta, image_service)
+
+    def _put_image_info_to_glance(self, context, image_metadata, image_service):
+        LOG.debug('start to put image info to glance')
+        LOG.debug('image metadata: %s' % image_metadata)
+
+        # self.glance_api.update(context, image_id, image_metadata)
+        with image_utils.temporary_file() as tmp:
+            with fileutils.file_open(tmp, 'wb+') as f:
+                f.truncate(image_metadata['size'])
+                image_service.update(context, image_metadata['id'], image_metadata, f)
+
+        LOG.debug('success to put image to glance')
+
+    def _create_image_into_docker_repository(self, wormhole_business, image_meta):
+        LOG.debug('start to create image into docker repository')
+        image_name = image_meta['name']
+        LOG.debug('image_name: %s' % image_name)
+        image_id = image_meta['id']
+        LOG.debug('image_id: %s' % image_id)
+        create_image_task = wormhole_business.create_image(image_name, image_id)
+        self._wait_for_task_finish(wormhole_business, create_image_task)
+        LOG.debug('success to create image into docker repository.')
+
+    @RetryDecorator(max_retry_count=50, inc_sleep_time=5, max_sleep_time=60,
+                    exceptions=(exception_ex.RetryException))
+    def _wait_for_task_finish(self, wormhole_business, task):
+        task_finish = False
+        if task['code'] == wormhole_constants.TASK_SUCCESS:
+            return True
+        current_task = wormhole_business.query_task(task)
+        task_code = current_task['code']
+
+        if wormhole_constants.TASK_DOING == task_code:
+            LOG.debug('task is DOING, status: %s' % task_code)
+            raise exception_ex.RetryException(error_info='task status is: %s' % task_code)
+        elif wormhole_constants.TASK_ERROR == task_code:
+            LOG.debug('task is ERROR, status: %s' % task_code)
+            raise Exception('task error, task status is: %s' % task_code)
+        elif wormhole_constants.TASK_SUCCESS == task_code:
+            LOG.debug('task is SUCCESS, status: %s' % task_code)
+            task_finish = True
+        else:
+            raise Exception('UNKNOW ERROR, task status: %s' % task_code)
+
+        LOG.debug('task: %s is finished' % task )
+
+        return task_finish
+
+    def _attache_provider_volume_to_base_vm(self, provider_node, provider_volume, wormhole_business):
+        old_devices_list = self._get_volume_device(wormhole_business)
+        mount_device = '/dev/sdf'
+        self._attache_volume_and_wait_for_attached(provider_node, provider_volume,
+                                                   self._trans_device_name(mount_device))
+        new_devices_list = self._get_volume_device(wormhole_business)
+
+        added_device_list = [device for device in new_devices_list if device not in old_devices_list]
+        added_device = added_device_list[0]
+        wormhole_business.attach_volume(provider_volume.id, added_device, mount_device)
+
+    def _trans_device_name(self, orig_name):
+        if not orig_name:
+            return orig_name
+        else:
+            return orig_name.replace('/dev/vd', '/dev/sd')
+
+    def _get_volume_device(self, wormhole_business):
+        volume_devices = wormhole_business.list_volume()
+        volume_device_list = volume_devices.get('devices')
+
+        return volume_device_list
+
+    def _wait_for_hyper_service_up(self, wormhole_business):
+        """
+        call get version
+        :param wormhole_business:
+        :return:
+        """
+        docker_version = wormhole_business.get_version()
+        LOG.debug('docker version is: %s' % docker_version)
+
+        return docker_version
+
+
+    def _create_node_for_copy_volume_to_image(self, node_name):
+        provider_image = self._get_provider_image_by_provider_id(self.base_ami_id)
+        provider_node_size = 8
+        provider_node = self._create_node(node_name, provider_image, provider_node_size)
+        return provider_node
+
+    def _attache_volume_and_wait_for_attached(self, provider_node, provider_hybrid_volume, device):
+        LOG.debug('Start to attach volume')
+        attache_result = self.adpter.attach_volume(provider_node, provider_hybrid_volume, device)
+        self._wait_for_volume_is_attached(provider_hybrid_volume)
+        LOG.info('end to attache volume: %s' % attache_result)
+
+    def _wait_for_volume_is_attached(self, provider_hybrid_volume):
+        LOG.debug('wait for volume is attached')
+        not_in_status = [StorageVolumeState.ERROR, StorageVolumeState.DELETED, StorageVolumeState.DELETING]
+        status = self._wait_for_volume_in_specified_status(provider_hybrid_volume, StorageVolumeState.INUSE,
+                                                           not_in_status)
+        LOG.debug('volume status: %s' % status)
+        LOG.debug('volume is attached.')
+        return
+
+    def _wait_for_volume_is_available(self, provider_hybrid_volume):
+        LOG.debug('wait for volume is available')
+        not_in_status = [StorageVolumeState.ERROR, StorageVolumeState.DELETED, StorageVolumeState.DELETING]
+        # import pdb; pdb.set_trace()
+        status = self._wait_for_volume_in_specified_status(provider_hybrid_volume, StorageVolumeState.AVAILABLE,
+                                                           not_in_status)
+        LOG.debug('volume status: %s' % status)
+        LOG.debug('volume is available')
+        return status
+
+    @RetryDecorator(max_retry_count=10,inc_sleep_time=5,max_sleep_time=60,exceptions=(exception_ex.RetryException))
+    def _wait_for_volume_in_specified_status(self, provider_hybrid_volume, status, not_in_status_list):
+        """
+
+        :param provider_hybrid_volume:
+        :param status: StorageVolumeState
+        :return: specified_status
+        """
+        LOG.debug('wait for volume in specified status: %s' % status)
+        LOG.debug('not_in_status_list: %s' % not_in_status_list)
+        provider_volume_id = provider_hybrid_volume.id
+        LOG.debug('wait for volume:%s in specified status: %s' % (provider_volume_id, status))
+        created_volumes = self.adpter.list_volumes(ex_volume_ids=[provider_volume_id])
+
+        if not created_volumes:
+            error_info = 'created docker app volume failed.'
+            raise exception_ex.RetryException(error_info=error_info)
+
+        created_volume = created_volumes[0]
+        current_status = created_volume.state
+        LOG.debug('current_status: %s' % current_status)
+        error_info = 'volume: %s status is %s' % (provider_hybrid_volume.id, current_status)
+
+        if status == current_status:
+            LOG.debug('current status: %s is the same with specified status %s ' % (current_status, status))
+        elif not_in_status_list:
+            if status in not_in_status_list:
+                raise Exception(error_info)
+            else:
+                raise exception_ex.RetryException(error_info=error_info)
+        else:
+            raise exception_ex.RetryException(error_info=error_info)
+
+        return current_status
+
+    def _get_provider_image_by_provider_id(self, image_id):
+        provider_image = None
+        provider_images = self.adpter.list_images(ex_image_ids=[image_id])
+        if provider_images:
+            if len(provider_images) == 1:
+                provider_image = provider_images[0]
+            elif len(provider_image) > 1:
+                error_info = 'More then one image are found for id: %s' % image_id
+                LOG.error(error_info)
+                raise Exception(error_info)
+            else:
+                provider_image = None
+        else:
+            provider_image = None
+
+        return provider_image
+
+    def _create_node(self, provider_node_name, provider_image, provider_size):
+        try:
+
+            LOG.info('provider_interfaces: %s' % self.provider_interfaces)
+            if len(self.provider_interfaces) > 1:
+                LOG.debug('Create provider node, length: %s' % len(self.provider_interfaces))
+                provider_node = self.adpter.create_node(name=provider_node_name,
+                                                                 image=provider_image,
+                                                                 size=provider_size,
+                                                                 location=CONF.provider_opts.availability_zone,
+                                                                 ex_network_interfaces=self.provider_interfaces)
+            elif len(self.provider_interfaces) == 1:
+                LOG.debug('Create provider node, length: %s' % len(self.provider_interfaces))
+                provider_subnet_data_id = self.provider_interfaces[0].subnet_id
+                provider_subnet_data = self.adpter.ex_list_subnets(subnet_ids=[provider_subnet_data_id])[0]
+                provider_node = self.adpter.create_node(name=provider_node_name,
+                                                                 image=provider_image,
+                                                                 size=provider_size,
+                                                                 location=CONF.provider_opts.availability_zone,
+                                                                 ex_subnet=provider_subnet_data,
+                                                                 ex_security_group_ids=self.provider_security_group_id)
+            else:
+                LOG.debug('Create provider node, length: %s' % len(self.provider_interfaces))
+                provider_node = self.adpter.create_node(name=provider_node_name,
+                                                                 image=provider_image,
+                                                                 size=provider_size,
+                                                                 location=CONF.provider_opts.availability_zone,
+                                                                 ex_security_group_ids=self.provider_security_group_id)
+
+        except Exception as e:
+            LOG.ERROR('Provider instance is booting error')
+            LOG.error(e.message)
+            provider_node = self.adpter.list_nodes(ex_filters={'tag:name':provider_node_name})
+            if not provider_node:
+                raise e
+            raise e
+        LOG.debug('create node success, provider_node: %s' % provider_node)
+
+        node_is_ok = False
+        while not node_is_ok:
+            provider_nodes = self.adpter.list_nodes(ex_node_ids=[provider_node.id])
+            if not provider_nodes:
+                error_info = 'There is no node created in provider. node id: %s' % provider_node.id
+                LOG.error(error_info)
+                continue
+            else:
+                provider_node = provider_nodes[0]
+                if provider_node.state == NodeState.RUNNING or provider_node.state == NodeState.STOPPED:
+                    LOG.debug('Node %s is created, and status is: %s' % (provider_node.name, provider_node.state))
+                    node_is_ok = True
+            time.sleep(10)
+
+        return provider_node
+
+    def _get_provider_node_size(self, flavor):
+        return NodeSize(id=CONF.provider_opts.flavor_map[flavor.name],
+                        name=None, ram=None, disk=None, bandwidth=None,price=None, driver=self.compute_adapter)
+
+    def _wait_for_snapshot_completed(self, provider_id_list):
+        is_all_completed = False
+        while not is_all_completed:
+            snapshot_list = self.compute_adapter.list_snapshots(snapshot_ids=provider_id_list)
+            is_all_completed = True
+            for snapshot in snapshot_list:
+                if snapshot.extra.get('state') != 'completed':
+                    is_all_completed = False
+                    time.sleep(10)
+                    break
+
+    def _get_provider_image(self,image_obj):
+        try:
+            image_uuid = self._get_image_id_from_meta(image_obj)
+            provider_image = self.compute_adapter.list_images(
+                ex_filters={'tag:hybrid_cloud_image_id':image_uuid})
+            if provider_image is None:
+                LOG.error('Can NOT get image %s from provider cloud tag' % image_uuid)
+                return provider_image
+            if len(provider_image)==0:
+                LOG.debug('Image %s NOT exist at provider cloud' % image_uuid)
+                return provider_image
+            elif len(provider_image)>1:
+                LOG.error('ore than one image are found through tag:hybrid_cloud_instance_id %s' % image_uuid)
+                raise exception_ex.MultiImageConfusion
+            else:
+                return provider_image[0]
+        except Exception as e:
+            LOG.error('get provider image failed: %s' % e.message)
+            return None
+
     def copy_image_to_volume(self, context, volume, image_service, image_id):
         LOG.error('begin time of copy_image_to_volume is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
         image_meta = image_service.show(context, image_id)
@@ -563,7 +1148,9 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                               
             except Exception as e:
                 raise e
-        else:
+        elif container_format == 'hybridvm':
+            info = 'Create volume from image, image_id: %s' % image_id
+            LOG.debug(info)
             pass
              
         LOG.error('end time of copy_image_to_volume is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))  
@@ -597,3 +1184,82 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             return {'provider_location': None}, False
         else:
             return {'provider_location': None}, True
+
+    def backup_volume(self, context, backup, backup_service):
+        """
+        This function replace the same name function in farther class.
+        so when use this volume driver, function "backup" in backup driver will be no usage.
+
+        :param context:
+        :param backup:
+        :param backup_service:
+        :return:
+        """
+        LOG.debug('context: %s' % context)
+        LOG.debug('backup: %s' % backup)
+        LOG.debug('backup_service: %s' % backup_service)
+        LOG.debug('type of backup_service: %s' % type(backup_service))
+        hybrid_volume_id = backup['volume_id']
+        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(hybrid_volume_id)
+
+        backup_snapshot = self.adpter.create_volume_snapshot(provider_volume)
+        if not backup_snapshot:
+            raise Exception('can not create snapshot for backup: %s' % backup['id'])
+        LOG.info("create backup_snapshot: %s for hybrid cloud volume: %s " % (backup_snapshot, hybrid_volume_id))
+
+        self._tag_provider_snapshot_with_hybrid_cloud_backup_id(backup_snapshot, backup)
+
+    def restore_backup(self, context, backup, volume, backup_service):
+        """
+
+        :param context:
+        :param backup:
+        :param volume:
+        :param backup_service:
+        :return:
+        """
+        LOG.debug('context: %s' % context)
+        LOG.debug('backup: %s' % _(backup))
+        LOG.debug('backup: %s ' % backup)
+        LOG.debug('backup id: %s' % backup['id'])
+        LOG.debug('volume: %s' % volume)
+        LOG.debug('volume id: %s' % volume['id'])
+        LOG.debug('volume: %s' % _(backup_service))
+
+        hybrid_cloud_backup_id = backup['id']
+        size = volume.size
+        name = volume.name
+        location = self._get_location()
+        provider_snapshot = self._get_provider_snapshot_by_tag_hybrid_backup_id(hybrid_cloud_backup_id)
+
+        original_provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(volume['id'])
+
+        if provider_snapshot:
+            provider_volume = self.adpter.create_volume_from_snapshot(size, name, location, provider_snapshot)
+            if not provider_volume:
+                raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
+            LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_volume.id))
+
+            # delete old mapped provider volume
+            self.adpter.destroy_volume(original_provider_volume)
+            # map new provider restored volume with hybrid cloud volume id
+            self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_volume, volume)
+            self._add_metadata_for_hybrid_volume(volume, provider_volume)
+        else:
+            error_info = 'Can not find provider snapshot for hybrid cloud backup: %s' % hybrid_cloud_backup_id
+            LOG.error(error_info)
+            raise exception.CinderException(error_info)
+        LOG.debug('end to create volume form snapshot')
+
+    def _get_provider_snapshot_by_tag_hybrid_backup_id(self, hybrid_cloud_backup_id):
+        LOG.debug('start to get provider snapshot by hybrid cloud backup id:%s' % hybrid_cloud_backup_id)
+        provider_snapshots =\
+            self.adpter.list_snapshots(ex_filters={'tag:hybrid_cloud_backup_id': hybrid_cloud_backup_id})
+        if provider_snapshots and len(provider_snapshots) == 1:
+            provider_snapshot = provider_snapshots[0]
+            LOG.debug('get provider snapshot: %s' % provider_snapshot.id)
+        else:
+            provider_snapshot = None
+        LOG.debug('End to get provider snapshot for hybrid cloud backup id:%s' % hybrid_cloud_backup_id)
+
+        return provider_snapshot

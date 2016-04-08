@@ -21,3 +21,6 @@ class VolumeNotFoundAtProvider(NovaException):
 
 class ProviderRequestTimeOut(NovaException):
     msg_fmt = _("Time out when connect to provider cloud")
+
+class RetryException(NovaException):
+    msg_fmt = _('Need to retry, error info: %(error_info)s')

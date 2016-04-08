@@ -25,3 +25,6 @@ class ProviderVolumeNotFound(NotFound):
 
 class VgwHostNotFound(NotFound):
     message = _("node of %(Vgw_id)s at provider cloud could not be found.")
+
+class RetryException(CinderException):
+    msg_fmt = _('Need to retry, error info: %(error_info)s')
