@@ -49,7 +49,8 @@ ec2api_opts = [
                help='the region for connection to EC2  '),
 
     cfg.StrOpt('driver_type',
-               default='ec2_ap_southeast',
+               # default='ec2_ap_southeast',
+               default='agent',
                help='the type for driver  '),
 
     cfg.StrOpt('provider_image_conversion_dir',
@@ -232,17 +233,17 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         LOG.debug('provider_subnet_api: %s' % self.provider_subnet_api)
         self.base_ami_id = self.configuration.base_ami_id
         LOG.debug('base_ami_id: %s' % self.base_ami_id)
-
+        LOG.debug('driver_type: %s' % self.configuration.driver_type)
         if self.configuration.driver_type == 'agent':
             # for agent solution by default
             self.provider_interfaces = []
-            if CONF.provider_opts.subnet_data:
+            if self.configuration.subnet_data:
                 provider_interface_data = adapter.NetworkInterface(name='eth_data',
                                                                    subnet_id=self.provider_subnet_data,
                                                                    device_index=0)
                 self.provider_interfaces.append(provider_interface_data)
 
-            if CONF.provider_opts.subnet_api:
+            if self.configuration.subnet_api:
                 provider_interface_api = adapter.NetworkInterface(name='eth_control',
                                                                   subnet_id=self.provider_subnet_api,
                                                                   device_index=1)
@@ -468,7 +469,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
     def _get_provider_volumeID_from_snapshot(self, snapshot):
         provider_volume_id = self._get_provider_volumeid_from_volume(snapshot['volume'])
         return provider_volume_id
-    
+
     def _get_provider_volume(self, volume_id):
         """
         get provider volume by provider volume id.
@@ -481,13 +482,13 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             #if not provider_volume_id:
             provider_volumes = self.adpter.list_volumes(ex_volume_ids=[volume_id])
             if provider_volumes is None:
-                LOG.warning('Can not get volume through tag:hybrid_cloud_volume_id %s' % volume_id) 
+                LOG.warning('Can not get volume through tag:hybrid_cloud_volume_id %s' % volume_id)
                 return provider_volumes
             if len(provider_volumes) == 1:
-                     
-                provider_volume = provider_volumes[0]   
+
+                provider_volume = provider_volumes[0]
             elif len(provider_volumes) >1:
-                LOG.warning('More than one volumes are found through tag:hybrid_cloud_volume_id %s' % volume_id)     
+                LOG.warning('More than one volumes are found through tag:hybrid_cloud_volume_id %s' % volume_id)
             else:
                 LOG.warning('Volume %s NOT Found at provider cloud' % volume_id)
         except Exception as e:
@@ -534,8 +535,29 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 provider_node=nodes[0]
         except Exception as e:
             LOG.error('Can NOT get node %s from provider cloud tag' % provider_node_id)
-            LOG.error(e.message) 
-            
+            LOG.error(e.message)
+
+        return provider_node
+
+    def _get_provider_node_by_hybrid_cloud_server_id(self, hybrid_server_id):
+        LOG.debug('start to _get_provider_node_by_hybrid_cloud_server_id for: %s' % hybrid_server_id)
+        provider_node = None
+        provider_nodes = self.adpter.list_nodes(ex_filters={'tag:hybrid_cloud_instance_id': hybrid_server_id})
+        if provider_nodes is None:
+            LOG.error('Can NOT get node through tag:hybrid_cloud_instance_id %s' % hybrid_server_id)
+            provider_node = None
+        else:
+            if len(provider_nodes) == 1:
+                provider_node = provider_nodes[0]
+            elif len(provider_nodes) > 1:
+                LOG.debug('More than one instance are found through tag:hybrid_cloud_instance_id %s' % hybrid_server_id)
+                provider_node = None
+            else:
+                LOG.debug('Instance %s NOT exist at provider cloud' % hybrid_server_id)
+                provider_node = None
+        LOG.debug('End to _get_provider_node_by_hybrid_cloud_server_id for: %s, provider node: %s' %
+                  (hybrid_server_id, provider_node))
+
         return provider_node
 
     def create_snapshot(self, snapshot):
@@ -633,7 +655,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
     def terminate_connection(self, volume, connector, **kwargs):
         pass
-    
+
     def _get_next_device_name(self,node):
         provider_bdm_list = node.extra.get('block_device_mapping')
         used_device_letter=set()
@@ -643,7 +665,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         unused_device_letter=list(all_letters - used_device_letter)
         device_name='/dev/xvd'+unused_device_letter[0]
         return device_name
-            
+
     def _get_management_url(self, kc,image_name, **kwargs):
         endpoint_info= kc.service_catalog.get_endpoints(**kwargs)
         endpoint_list = endpoint_info.get(kwargs.get('service_type'),None)
@@ -652,10 +674,12 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             for endpoint in endpoint_list:
                 if region_name == endpoint.get('region'):
                     return endpoint.get('publicURL')
-    
-    def copy_volume_to_image(self, context, volume, image_service, image_meta): 
+
+    def copy_volume_to_image(self, context, volume, image_service, image_meta):
         LOG.error('begin time of copy_volume_to_image is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
-        container_format=image_meta.get('container_format')
+        container_format = image_meta.get('container_format')
+        LOG.debug('container_format: %s' % container_format)
+        LOG.debug('image_meta: %s' % container_format)
         image_name = image_meta.get('name')
         file_name = image_meta.get('id')
         if container_format == 'vgw_url':
@@ -669,25 +693,25 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                     'insecure': True
                 }
             keystoneclient = kc.Client(**kwargs)
-         
-                 
+
+
             vgw_url = self._get_management_url(keystoneclient,image_name, service_type='v2v')
-            
+
             #vgw_url = 'http://162.3.125.52:9999/'
             volume_id = volume['id']
- 
+
             #1.get the provider_volume at provider cloud  
             provider_volume_id = self._get_provider_volumeid_from_volume(volume)
             if not provider_volume_id:
-                LOG.error('get provider_volume_id of volume %s error' % volume_id) 
+                LOG.error('get provider_volume_id of volume %s error' % volume_id)
                 raise exception_ex.ProviderVolumeNotFound(volume_id=volume_id)
             provider_volume=self._get_provider_volume(provider_volume_id)
             if not provider_volume:
-                LOG.error('get provider_volume of volume %s at provider cloud error' % volume_id) 
+                LOG.error('get provider_volume of volume %s at provider cloud error' % volume_id)
                 raise exception_ex.ProviderVolumeNotFound(volume_id=volume_id)
-            
+
             origin_provider_volume_state = provider_volume.extra.get('attachment_status')
-            
+
             LOG.error('the origin_provider_volume_info is %s' % str(provider_volume.__dict__))
             origin_attach_node_id = None
             origin_device_name=None
@@ -730,10 +754,10 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                         time.sleep(2)
                         provider_volume=self._get_provider_volume(provider_volume_id)
                         retry_time = retry_time-1
-                
+
             except Exception as e:
                 raise e
-            time.sleep(5)           
+            time.sleep(5)
             conn=rpyc.connect(self.configuration.cgw_host_ip,int(CONF.vgw.rpc_service_port))
             LOG.error('begin time of copy_volume_to_file is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
             full_file_path = conn.root.copy_volume_to_file(device_name,file_name,CONF.vgw.store_file_dir)
@@ -772,11 +796,11 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                     provider_volume=self._get_provider_volume(provider_volume_id)
                     retry_time = retry_time-1
             LOG.error('**********************************************')
-            LOG.error('the volume status %s' %provider_volume.state)       
+            LOG.error('the volume status %s' %provider_volume.state)
             #attach the volume back         
             if origin_provider_volume_state is not None:
                 origin_attach_node = self._get_provider_node(origin_attach_node_id)
-                 
+
                 self.adpter.attach_volume(origin_attach_node, provider_volume,
                                            origin_device_name)
         elif container_format == CONTAINER_FORMAT_HYBRID_VM:
@@ -797,7 +821,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 raise exception_ex.ProviderExportVolumeError
             temp_path = os.path.join(self.configuration.provider_image_conversion_dir, str(image_meta['id']))
             upload_image = temp_path
-    
+
             try:
                 image_utils.upload_volume(context, image_service, image_meta,
                                           upload_image)
@@ -808,18 +832,19 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
     def _copy_volume_to_image_for_hyper_vm(self, context, volume, image_service, image_meta):
         LOG.debug('volume: %s' % volume)
         LOG.debug('image_meta: %s' % image_meta)
-        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(volume.id)
-
+        hybrid_cloud_volume_id = volume['id']
+        provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(hybrid_cloud_volume_id)
+        LOG.debug('provider volume state: %s' % provider_volume.state)
         if provider_volume.state == StorageVolumeState.AVAILABLE:
             # create base-vm in aws first.
-            provider_node = self._create_node_for_copy_volume_to_image(volume.id)
+            provider_node = self._create_node_for_copy_volume_to_image(hybrid_cloud_volume_id)
             # attache data volume for user docker container to base-vm.
             self._attache_volume_and_wait_for_attached(provider_node, provider_volume, '/dev/sdz')
             port = self.configuration.hybrid_service_port
             LOG.debug('wormhole port: %s' % port)
             wormhole_business = WormHoleBusinessAWS(provider_node, self.adpter, port)
             self._wait_for_hyper_service_up(wormhole_business)
-            self._attache_provider_volume_to_base_vm(provider_node, provider_volume, wormhole_business)
+            # self._attache_provider_volume_to_base_vm(provider_node, provider_volume, wormhole_business)
             self._create_image_into_docker_repository(wormhole_business, image_meta)
             docker_image_info = wormhole_business.image_info(image_meta['name'], image_meta['id'])
             LOG.debug('get docker image info: %s' % docker_image_info)
@@ -827,18 +852,43 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             LOG.debug('docker_image_size: %s' % docker_image_size)
             image_meta['container_format'] = CONTAINER_FORMAT_HYBRID_VM
             image_meta['size'] = docker_image_size
-            LOG.debug('image_meta with size: %s' % image_meta )
+            LOG.debug('image_meta with size: %s' % image_meta)
+            self._put_image_info_to_glance(context, image_meta, image_service)
+        elif provider_volume.state == StorageVolumeState.INUSE:
+            LOG.debug('Volume is inuse')
+            # hybrid_cloud_server_id = volume['instance_uuid']
+            # LOG.debug('hybrid cloud server id: %s' % hybrid_cloud_server_id)
+            # LOG.debug('hybrid_cloud_server_id: %s' % hybrid_cloud_server_id)
+            # provider_node = self._get_provider_node_by_hybrid_cloud_server_id(hybrid_cloud_server_id)
+            provider_node_id = provider_volume.extra['instance_id']
+            provider_node = self._get_provider_node(provider_node_id)
+            LOG.debug('get provider_node: %s' % provider_node.id)
+            if not provider_node:
+                raise Exception('provider node is None')
+            port = self.configuration.hybrid_service_port
+            LOG.debug('wormhole port: %s' % port)
+            LOG.debug('Start to get clients')
+            wormhole_business = WormHoleBusinessAWS(provider_node, self.adpter, port)
+            self._wait_for_hyper_service_up(wormhole_business)
+            self._create_image_into_docker_repository(wormhole_business, image_meta)
+            docker_image_info = wormhole_business.image_info(image_meta['name'], image_meta['id'])
+            LOG.debug('get docker image info: %s' % docker_image_info)
+            docker_image_size = docker_image_info['size']
+            LOG.debug('docker_image_size: %s' % docker_image_size)
+            image_meta['container_format'] = CONTAINER_FORMAT_HYBRID_VM
+            image_meta['size'] = docker_image_size
+            LOG.debug('image_meta with size: %s' % image_meta)
             self._put_image_info_to_glance(context, image_meta, image_service)
 
     def _put_image_info_to_glance(self, context, image_metadata, image_service):
         LOG.debug('start to put image info to glance')
         LOG.debug('image metadata: %s' % image_metadata)
 
-        # self.glance_api.update(context, image_id, image_metadata)
         with image_utils.temporary_file() as tmp:
-            with fileutils.file_open(tmp, 'wb+') as f:
-                f.truncate(image_metadata['size'])
-                image_service.update(context, image_metadata['id'], image_metadata, f)
+            try:
+                image_utils.upload_volume(context, image_service, image_metadata, tmp)
+            finally:
+                fileutils.delete_if_exists(tmp)
 
         LOG.debug('success to put image to glance')
 
@@ -879,7 +929,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
     def _attache_provider_volume_to_base_vm(self, provider_node, provider_volume, wormhole_business):
         old_devices_list = self._get_volume_device(wormhole_business)
-        mount_device = '/dev/sdf'
+        mount_device = '/dev/sdz'
         self._attache_volume_and_wait_for_attached(provider_node, provider_volume,
                                                    self._trans_device_name(mount_device))
         new_devices_list = self._get_volume_device(wormhole_business)
@@ -913,10 +963,18 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
 
     def _create_node_for_copy_volume_to_image(self, node_name):
+        LOG.debug('start to create node')
         provider_image = self._get_provider_image_by_provider_id(self.base_ami_id)
-        provider_node_size = 8
+        provider_node_size = self._get_provider_node_size('t2.micro')
+
         provider_node = self._create_node(node_name, provider_image, provider_node_size)
+
+        LOG.debug('success to create node: %s' % provider_node.id)
         return provider_node
+
+    def _get_provider_node_size(self, flavor_id):
+        return NodeSize(id=flavor_id,
+                        name="", ram="", disk="", bandwidth="", price="", driver=self.adpter)
 
     def _attache_volume_and_wait_for_attached(self, provider_node, provider_hybrid_volume, device):
         LOG.debug('Start to attach volume')
@@ -997,15 +1055,14 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
     def _create_node(self, provider_node_name, provider_image, provider_size):
         try:
-
             LOG.info('provider_interfaces: %s' % self.provider_interfaces)
             if len(self.provider_interfaces) > 1:
                 LOG.debug('Create provider node, length: %s' % len(self.provider_interfaces))
                 provider_node = self.adpter.create_node(name=provider_node_name,
-                                                                 image=provider_image,
-                                                                 size=provider_size,
-                                                                 location=CONF.provider_opts.availability_zone,
-                                                                 ex_network_interfaces=self.provider_interfaces)
+                                                        image=provider_image,
+                                                        size=provider_size,
+                                                        location=self.configuration.availability_zone,
+                                                        ex_network_interfaces=self.provider_interfaces)
             elif len(self.provider_interfaces) == 1:
                 LOG.debug('Create provider node, length: %s' % len(self.provider_interfaces))
                 provider_subnet_data_id = self.provider_interfaces[0].subnet_id
@@ -1013,7 +1070,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 provider_node = self.adpter.create_node(name=provider_node_name,
                                                                  image=provider_image,
                                                                  size=provider_size,
-                                                                 location=CONF.provider_opts.availability_zone,
+                                                                 location=self.configuration.availability_zone,
                                                                  ex_subnet=provider_subnet_data,
                                                                  ex_security_group_ids=self.provider_security_group_id)
             else:
@@ -1021,12 +1078,11 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 provider_node = self.adpter.create_node(name=provider_node_name,
                                                                  image=provider_image,
                                                                  size=provider_size,
-                                                                 location=CONF.provider_opts.availability_zone,
+                                                                 location=self.configuration.availability_zone,
                                                                  ex_security_group_ids=self.provider_security_group_id)
 
         except Exception as e:
-            LOG.ERROR('Provider instance is booting error')
-            LOG.error(e.message)
+            LOG.error('Provider instance is booting error, exception: %s' % traceback.format_exc(e))
             provider_node = self.adpter.list_nodes(ex_filters={'tag:name':provider_node_name})
             if not provider_node:
                 raise e
@@ -1048,41 +1104,6 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             time.sleep(10)
 
         return provider_node
-
-    def _get_provider_node_size(self, flavor):
-        return NodeSize(id=CONF.provider_opts.flavor_map[flavor.name],
-                        name=None, ram=None, disk=None, bandwidth=None,price=None, driver=self.compute_adapter)
-
-    def _wait_for_snapshot_completed(self, provider_id_list):
-        is_all_completed = False
-        while not is_all_completed:
-            snapshot_list = self.compute_adapter.list_snapshots(snapshot_ids=provider_id_list)
-            is_all_completed = True
-            for snapshot in snapshot_list:
-                if snapshot.extra.get('state') != 'completed':
-                    is_all_completed = False
-                    time.sleep(10)
-                    break
-
-    def _get_provider_image(self,image_obj):
-        try:
-            image_uuid = self._get_image_id_from_meta(image_obj)
-            provider_image = self.compute_adapter.list_images(
-                ex_filters={'tag:hybrid_cloud_image_id':image_uuid})
-            if provider_image is None:
-                LOG.error('Can NOT get image %s from provider cloud tag' % image_uuid)
-                return provider_image
-            if len(provider_image)==0:
-                LOG.debug('Image %s NOT exist at provider cloud' % image_uuid)
-                return provider_image
-            elif len(provider_image)>1:
-                LOG.error('ore than one image are found through tag:hybrid_cloud_instance_id %s' % image_uuid)
-                raise exception_ex.MultiImageConfusion
-            else:
-                return provider_image[0]
-        except Exception as e:
-            LOG.error('get provider image failed: %s' % e.message)
-            return None
 
     def copy_image_to_volume(self, context, volume, image_service, image_id):
         LOG.error('begin time of copy_image_to_volume is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
@@ -1124,15 +1145,15 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 LOG.error('**********************************************')
                 LOG.error('the volume status %s' %provider_volume.state)
                 conn=rpyc.connect(self.configuration.cgw_host_ip,int(CONF.vgw.rpc_service_port))
-                
+
                 copy_file_to_device_result = conn.root.copy_file_to_volume(image_id,CONF.vgw.store_file_dir,device_name)
                 if not copy_file_to_device_result:
-                    LOG.error("qemu-img convert %s %s failed" %(image_id,device_name)) 
+                    LOG.error("qemu-img convert %s %s failed" %(image_id,device_name))
                     self.adpter.detach_volume(provider_volume)
                     conn.close()
                     raise exception.ImageUnacceptable(
                         reason= ("copy image %s file to volume %s failed " %(image_id,volume['id'])))
-                conn.close()   
+                conn.close()
                 self.adpter.detach_volume(provider_volume)
                 retry_time = 10
                 while retry_time > 0:
@@ -1142,19 +1163,19 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                         time.sleep(1)
                         provider_volume=self._get_provider_volume(provider_volume_id)
                         retry_time = retry_time-1
-                
+
                 LOG.error('**********************************************')
                 LOG.error('the volume status %s' %provider_volume.state)
-                              
+
             except Exception as e:
                 raise e
         elif container_format == 'hybridvm':
             info = 'Create volume from image, image_id: %s' % image_id
             LOG.debug(info)
             pass
-             
-        LOG.error('end time of copy_image_to_volume is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))  
-        
+
+        LOG.error('end time of copy_image_to_volume is %s' %(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
+
 
     def validate_connector(self, connector):
         """Fail if connector doesn't contain all the data needed by driver."""

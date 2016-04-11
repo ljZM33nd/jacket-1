@@ -35,6 +35,7 @@ import adapter
 import exception_ex
 from nova.virt.aws import image_utils
 
+
 hybrid_cloud_opts = [
 
     cfg.StrOpt('provide_cloud_type',
@@ -148,22 +149,16 @@ ec2_opts = [
     cfg.StrOpt('hybrid_service_port',
                default='7127',
                help='The route gw of the provider network.'),
-    cfg.StrOpt('provider_image_id', default=None)
+    cfg.StrOpt('base_ami_id', default='ami-a6d104c5')
     ]
 
 instance_task_map={}
 
-class NodeState(object):
-    RUNNING = 0
-    TERMINATED = 2
-    PENDING = 3
-    UNKNOWN = 4
-    STOPPED = 5
-    
+
 AWS_POWER_STATE={
     NodeState.RUNNING:power_state.RUNNING,
     NodeState.TERMINATED:power_state.CRASHED,
-    NodeState.PENDING:power_state.BUILDING,
+    NodeState.PENDING:power_state.NOSTATE,
     NodeState.UNKNOWN:power_state.NOSTATE,
     NodeState.STOPPED:power_state.SHUTDOWN,              
 }
@@ -269,7 +264,7 @@ class AwsEc2Driver(driver.ComputeDriver):
 
         self.provider_security_group_id = None
         self.provider_interfaces = []
-        self.base_ami_id = CONF.provider_opts.provider_image_id
+        self.base_ami_id = CONF.provider_opts.base_ami_id
 
         if CONF.provider_opts.driver_type == 'agent':
             self.provider_subnet_data = CONF.provider_opts.subnet_data
@@ -1244,7 +1239,12 @@ class AwsEc2Driver(driver.ComputeDriver):
         image_name = image_metadata_of_root_volume['image_name']
         LOG.debug('image name of boot volume is: %s' % image_name)
 
-        provider_image = self._get_provider_image_by_id(image_id)
+        provider_image = self._get_provider_image_by_hybrid_id(image_id)
+        if not provider_image:
+            provider_image = self._get_provider_image_by_provider_id(self.base_ami_id)
+            if provider_image is None:
+                LOG.error('Can not get provider image for base ami: %s of docker' % self.base_ami_id)
+                raise Exception('Can not get provider image for base ami: %s of docker' % self.base_ami_id)
 
         LOG.debug('provider_image: %s' % provider_image)
         provider_size = self._get_provider_node_size(instance.get_flavor())
@@ -1579,8 +1579,8 @@ class AwsEc2Driver(driver.ComputeDriver):
             self._set_tag_for_provider_volume(provider_volume, volume_id)
 
     def _get_provider_image_id(self, image_obj):
+        image_uuid = self._get_image_id_from_meta(image_obj)
         try:
-            image_uuid = self._get_image_id_from_meta(image_obj)
             provider_image = self.compute_adapter.list_images(ex_filters={'tag:hybrid_cloud_image_id': image_uuid})
             if provider_image is None:
                 raise exception_ex.ProviderRequestTimeOut
@@ -1620,6 +1620,7 @@ class AwsEc2Driver(driver.ComputeDriver):
             return None
 
     def _get_provider_image_by_provider_id(self, image_id):
+        LOG.debug('start to _get_provider_image_by_provider_id')
         provider_image = None
         provider_images = self.compute_adapter.list_images(ex_image_ids=[image_id])
         if provider_images:
@@ -1630,48 +1631,37 @@ class AwsEc2Driver(driver.ComputeDriver):
                 LOG.error(error_info)
                 raise exception_ex.MultiImageConfusion
             else:
+                LOG.debug('len of image list result is 0, return None')
                 provider_image = None
         else:
+            LOG.debug('list result is None, can not found provider images. return None')
             provider_image = None
 
+        LOG.debug('end to _get_provider_image_by_provider_id: %s' % provider_image)
         return provider_image
 
     @RetryDecorator(max_retry_count=3,inc_sleep_time=1,max_sleep_time=60,
                         exceptions=(Exception))
-    def _get_provider_image_by_id(self, image_uuid):
+    def _get_provider_image_by_hybrid_id(self, image_uuid):
         provider_images = self.compute_adapter.list_images(
-            ex_filters={'tag:hybrid_cloud_image_id':image_uuid})
+            ex_filters={'tag:hybrid_cloud_image_id': image_uuid})
 
         if provider_images is None:
-            provider_image = self._get_provider_image_by_provider_id(self.base_ami_id)
-            if provider_image is None:
-                error_info = 'Can NOT get image %s from base ami id' % self.base_ami_id
+            provider_image = None
+        else:
+            length_provider_images = len(provider_images)
+            if length_provider_images == 0:
+                provider_image = None
+            elif length_provider_images > 1:
+                error_info = 'More than one image are found through tag:hybrid_cloud_instance_id %s' % image_uuid
                 LOG.error(error_info)
                 raise Exception(error_info)
-        if len(provider_images) == 0:
-            error_info = 'Image %s NOT exist at provider cloud' % image_uuid
-            LOG.debug(error_info)
-            raise Exception(error_info)
-        elif len(provider_images) > 1:
-            error_info = 'More than one image are found through tag:hybrid_cloud_instance_id %s' % image_uuid
-            LOG.error(error_info)
-            raise Exception(error_info)
-        elif len(provider_images) == 1:
-            provider_image = provider_images[0]
-        else:
-            raise Exception('Unknow issue, the length of images is less then 0')
+            elif length_provider_images == 1:
+                provider_image = provider_images[0]
+            else:
+                raise Exception('Unknow issue, the length of images is less then 0')
 
         return provider_image
-
-    def _check_image_exist(self, image_id):
-        is_exist = False
-        try:
-            image = self._get_provider_image_by_id(image_id)
-            is_exist = True
-        except Exception, e:
-            is_exist = False
-
-        return is_exist
 
     def _update_vm_task_state(self, instance, task_state):
         instance.task_state = task_state
@@ -1987,6 +1977,8 @@ class AwsEc2Driver(driver.ComputeDriver):
         bdm_list = block_device_info.get('block_device_mapping')
         for bdm in bdm_list:
             if bdm['boot_index'] == 0:
+                hybrid_volume = self._get_volume_from_bdm(context, bdm)
+                bdm['size'] = hybrid_volume.get('size')
                 continue
             hybrid_cloud_volume_id = bdm.get('connection_info').get('data').get('volume_id')
             provider_volume_id = self._get_provider_volume_id(context, hybrid_cloud_volume_id)

@@ -6,8 +6,8 @@ from wormholeclient.client import Client
 from wormholeclient import errors
 from wormholeclient import constants as wormhole_constants
 from exception_ex import RetryException
+from cinder.openstack.common import log as logging
 
-import logging
 import time
 import traceback
 
@@ -142,7 +142,9 @@ class WormHoleBusinessAWS(WormHoleBusiness):
         super(WormHoleBusinessAWS, self).__init__(wormhole_service_port)
 
     def get_clients(self):
+        LOG.debug('Start to get clients.')
         ips = self._get_node_private_ips(self.provider_node)
+        LOG.debug('private ips: %s' % ips)
         return self._get_hybrid_service_client(ips, self.wormhole_service_port)
 
     def _get_node_private_ips(self, provider_node):
