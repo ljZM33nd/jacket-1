@@ -689,6 +689,8 @@ class VCloudDriver(driver.ComputeDriver):
                                  {'volume_name': vcloud_volume_name,
                                   'instance_name': vapp_name})
 
+                    root_bdm['size'] = root_volume['size']
+
                     attached_disk_names.append(vcloud_volume_name)
                     undo_mgr.undo_with(_detach_disks_to_vm)
                 else:
