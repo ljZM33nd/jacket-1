@@ -57,7 +57,7 @@ class RetryDecorator(object):
                     try:
                         return f(*args, **kwargs)
                     except self._exceptions as e:
-                        LOG.error('retry times: %s, exception: %s' %
+                        LOG.debug('retry times: %s, exception: %s' %
                                   (str(self._max_retry_count - max_retries), traceback.format_exc(e)))
                         time.sleep(mdelay)
                         max_retries -= 1
@@ -65,7 +65,7 @@ class RetryDecorator(object):
                             mdelay = self._max_sleep_time
                 if max_retries == 1:
                     msg = 'func: %s, retry times: %s, failed' % (f.__name__, str(self._max_retry_count))
-                    LOG.error(msg)
+                    LOG.debug(msg)
                 return f(*args, **kwargs)
 
             return f_retry

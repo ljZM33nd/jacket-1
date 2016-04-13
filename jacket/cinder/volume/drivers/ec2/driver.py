@@ -521,8 +521,8 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
 
         return provider_volume
 
-    def _get_provider_node(self,provider_node_id):
-        provider_node=None
+    def _get_provider_node(self, provider_node_id):
+        provider_node = None
         try:
             nodes = self.adpter.list_nodes(ex_node_ids=[provider_node_id])
             if nodes is None:
@@ -836,49 +836,124 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         provider_volume = self._get_provider_volume_by_tag_hybrid_cloud_volume_id(hybrid_cloud_volume_id)
         LOG.debug('provider volume state: %s' % provider_volume.state)
         if provider_volume.state == StorageVolumeState.AVAILABLE:
-            # create base-vm in aws first.
+            # create base-vm node in aws first.
             provider_node = self._create_node_for_copy_volume_to_image(hybrid_cloud_volume_id)
+
             # attache data volume for user docker container to base-vm.
             self._attache_volume_and_wait_for_attached(provider_node, provider_volume, '/dev/sdz')
             port = self.configuration.hybrid_service_port
-            LOG.debug('wormhole port: %s' % port)
+
+            # create image in docker repository
             wormhole_business = WormHoleBusinessAWS(provider_node, self.adpter, port)
             self._wait_for_hyper_service_up(wormhole_business)
-            # self._attache_provider_volume_to_base_vm(provider_node, provider_volume, wormhole_business)
             self._create_image_into_docker_repository(wormhole_business, image_meta)
+
+            # update image info in glance and upload image data to glance.
             docker_image_info = wormhole_business.image_info(image_meta['name'], image_meta['id'])
-            LOG.debug('get docker image info: %s' % docker_image_info)
             docker_image_size = docker_image_info['size']
-            LOG.debug('docker_image_size: %s' % docker_image_size)
             image_meta['container_format'] = CONTAINER_FORMAT_HYBRID_VM
             image_meta['size'] = docker_image_size
-            LOG.debug('image_meta with size: %s' % image_meta)
             self._put_image_info_to_glance(context, image_meta, image_service)
+
+            # detach data volume and clear base-vm node.
+            provider_node = self._get_provider_node(provider_node.id)
+            LOG.debug('provider_node: %s, status is: %s' % (provider_node.id, provider_node.state))
+            if provider_node.state != NodeState.STOPPED and provider_node.state != NodeState.TERMINATED:
+                    self._stop_node(provider_node)
+            self._detach_provider_volume(provider_volume)
+            self._destroy_node(provider_node)
+
         elif provider_volume.state == StorageVolumeState.INUSE:
             LOG.debug('Volume is inuse')
-            # hybrid_cloud_server_id = volume['instance_uuid']
-            # LOG.debug('hybrid cloud server id: %s' % hybrid_cloud_server_id)
-            # LOG.debug('hybrid_cloud_server_id: %s' % hybrid_cloud_server_id)
-            # provider_node = self._get_provider_node_by_hybrid_cloud_server_id(hybrid_cloud_server_id)
+            # get provider node which attaching the provider volume.
             provider_node_id = provider_volume.extra['instance_id']
             provider_node = self._get_provider_node(provider_node_id)
             LOG.debug('get provider_node: %s' % provider_node.id)
             if not provider_node:
                 raise Exception('provider node is None')
+
             port = self.configuration.hybrid_service_port
             LOG.debug('wormhole port: %s' % port)
             LOG.debug('Start to get clients')
+
+            # create image in docker repository
             wormhole_business = WormHoleBusinessAWS(provider_node, self.adpter, port)
             self._wait_for_hyper_service_up(wormhole_business)
             self._create_image_into_docker_repository(wormhole_business, image_meta)
+
+            # update image info in glance and upload image data to glance.
             docker_image_info = wormhole_business.image_info(image_meta['name'], image_meta['id'])
-            LOG.debug('get docker image info: %s' % docker_image_info)
             docker_image_size = docker_image_info['size']
-            LOG.debug('docker_image_size: %s' % docker_image_size)
             image_meta['container_format'] = CONTAINER_FORMAT_HYBRID_VM
             image_meta['size'] = docker_image_size
-            LOG.debug('image_meta with size: %s' % image_meta)
             self._put_image_info_to_glance(context, image_meta, image_service)
+
+    def _stop_node(self, node):
+        LOG.debug('start to stop node: %s' % node.id)
+        self.adpter.ex_stop_node(node)
+        self._wait_for_node_in_specified_state(node, NodeState.STOPPED)
+        LOG.debug('end to stop node: %s' % node.id)
+
+    def _wait_for_node_in_specified_state(self, node, state):
+        LOG.debug('wait for node is in state: %s' % state)
+        state_of_current_node = self._get_node_state(node)
+        time.sleep(2)
+        while state_of_current_node != state:
+            state_of_current_node = self._get_node_state(node)
+            LOG.debug('status of node currently is: %s' % state_of_current_node)
+            time.sleep(2)
+
+    def _get_node_state(self, node):
+        nodes = self.adpter.list_nodes(ex_node_ids=[node.id])
+        if nodes and len(nodes) == 1:
+            current_node = nodes[0]
+            state_of_current_node = current_node.state
+        else:
+            raise Exception('Node is not exist, node id: %s' % node.id)
+        LOG.debug('state of current is: %s' % state_of_current_node)
+
+        return state_of_current_node
+
+    def _destroy_node(self, node):
+        LOG.debug('start to destroy node: %s' % node.id)
+        if node.state != NodeState.TERMINATED:
+            self.adpter.destroy_node(node)
+
+            while node.state != NodeState.TERMINATED:
+                time.sleep(5)
+                nodes = self.adpter.list_nodes(ex_node_ids=[node.id])
+                if not nodes:
+                    break
+                else:
+                    node = nodes[0]
+        LOG.debug('end to destory node: %s' % node.id)
+
+    def _detach_provider_volume(self, volume):
+        LOG.debug('start to detach volume')
+        self.adpter.detach_volume(volume)
+        self._wait_for_volume_in_specified_state(volume, StorageVolumeState.AVAILABLE)
+        LOG.debug('end to detach volume')
+
+    def _wait_for_volume_in_specified_state(self, volume, state):
+        LOG.debug('wait for volume in state: %s' % state)
+        state_of_volume = self._get_volume_state(volume)
+        time.sleep(2)
+        while state_of_volume != state:
+            state_of_volume = self._get_volume_state(volume)
+
+            time.sleep(2)
+
+    def _get_volume_state(self, volume):
+        volume_id = volume.id
+        provider_volumes = self.adpter.list_volumes(ex_volume_ids=[volume_id])
+        if provider_volumes and len(provider_volumes) == 1:
+            current_volume = provider_volumes[0]
+            state_of_volume = current_volume.state
+        else:
+            raise Exception('There is not provider volume for id: %s' % volume_id)
+        LOG.debug('current volume state is: %s' % state_of_volume)
+
+        return state_of_volume
 
     def _put_image_info_to_glance(self, context, image_metadata, image_service):
         LOG.debug('start to put image info to glance')
@@ -926,17 +1001,6 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         LOG.debug('task: %s is finished' % task )
 
         return task_finish
-
-    def _attache_provider_volume_to_base_vm(self, provider_node, provider_volume, wormhole_business):
-        old_devices_list = self._get_volume_device(wormhole_business)
-        mount_device = '/dev/sdz'
-        self._attache_volume_and_wait_for_attached(provider_node, provider_volume,
-                                                   self._trans_device_name(mount_device))
-        new_devices_list = self._get_volume_device(wormhole_business)
-
-        added_device_list = [device for device in new_devices_list if device not in old_devices_list]
-        added_device = added_device_list[0]
-        wormhole_business.attach_volume(provider_volume.id, added_device, mount_device)
 
     def _trans_device_name(self, orig_name):
         if not orig_name:
