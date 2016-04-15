@@ -25,7 +25,7 @@ from nova.network import model as network_model
 from nova.openstack.common import log as logging
 
 from nova.virt import driver
-from jacket.nova.virt.vtep import network_api
+from nova.virt.vtep import network_api
 
 
 vtep_opts = [

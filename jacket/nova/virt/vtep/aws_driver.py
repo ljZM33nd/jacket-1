@@ -21,8 +21,8 @@ from oslo.config import cfg
 from nova import exception
 from nova.openstack.common import log as logging
 
-from jacket.nova.virt.vtep.driver import ProviderPort, VtepDriver
-from jacket.nova.virt.aws import driver as aws_driver
+from nova.virt.vtep.driver import ProviderPort, VtepDriver
+from nova.virt.aws import driver as aws_driver
 
 
 CONF = cfg.CONF
@@ -46,27 +46,33 @@ class VtepAWSDriver(VtepDriver, aws_driver.AwsEc2Driver):
         # NOTE(nkapotoxin): Generate nwinfo with fixed network, cause vcloud
         # driver create vm instance with vdc network id is vif.id in network_info,
         # so just set it to network_id
-        nwinfo = self._allocate_provider_vifs([
-            CONF.vtepdriver.provider_tunnel_network_name,
-            CONF.vtepdriver.provider_api_network_name])
+        image_container_type = instance.system_metadata.get('image_container_format')
+        if image_container_type != 'hybridvm':
+            nwinfo = self._allocate_provider_vifs([
+                CONF.vtepdriver.provider_tunnel_network_name,
+                CONF.vtepdriver.provider_api_network_name])
 
-        aws_driver.AwsEc2Driver.spawn(self, context, instance, image_meta,
-                                      injected_files, admin_password,
-                                      nwinfo, block_device_info)
+            aws_driver.AwsEc2Driver.spawn(self, context, instance, image_meta,
+                                          injected_files, admin_password,
+                                          nwinfo, block_device_info)
 
-        # Check provider network port use vm mac, change
-        # mac and name of nwinfo
-        instance_mac = None
-        try:
-            instance_mac = self.get_instance_macs(instance)
-        except Exception:
-            LOG.error(
-                "Get mac from aws error, instance:%s" %
-                instance,
-                exc_info=True)
-            raise exception.NovaException(
-                "Get mac error from instance:%s" % instance)
+            # Check provider network port use vm mac, change
+            # mac and name of nwinfo
+            instance_mac = None
+            try:
+                instance_mac = self.get_instance_macs(instance)
+            except Exception:
+                LOG.error(
+                    "Get mac from aws error, instance:%s" %
+                    instance,
+                    exc_info=True)
+                raise exception.NovaException(
+                    "Get mac error from instance:%s" % instance)
 
-        # Generate provider_network port
-        self._allocate_provider_port(context, instance, network_info,
-                                     instance_mac)
+            # Generate provider_network port
+            self._allocate_provider_port(context, instance, network_info,
+                                         instance_mac)
+        else:
+            aws_driver.AwsEc2Driver.spawn(self, context, instance, image_meta,
+                                          injected_files, admin_password,
+                                          network_info, block_device_info)

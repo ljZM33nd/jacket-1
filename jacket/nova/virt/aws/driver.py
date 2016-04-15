@@ -766,7 +766,7 @@ class AwsEc2Driver(driver.ComputeDriver):
         except Exception as e:
             LOG.warning('Provider instance is booting error')
             LOG.error(e.message)
-            provider_node=self.compute_adapter.list_nodes(ex_filters={'tag:name':provider_node_name})
+            provider_node = self.compute_adapter.list_nodes(ex_filters={'tag:name':provider_node_name})
             if not provider_node:
                 raise e
             
@@ -1131,7 +1131,7 @@ class AwsEc2Driver(driver.ComputeDriver):
                                                                                      instance._key_name))
 
         except Exception as e:
-            LOG.ERROR('Provider instance is booting error')
+            LOG.error('Provider instance is booting error')
             LOG.error(e.message)
             provider_node = self.compute_adapter.list_nodes(ex_filters={'tag:name':provider_node_name})
             if not provider_node:
@@ -2403,6 +2403,23 @@ class AwsEc2Driver(driver.ComputeDriver):
             state_of_current_node = self._get_node_state(node)
             time.sleep(2)
 
+    def _if_node_in_specified_states_with_times(self, node, states, sleep_time, wait_times):
+        LOG.debug('wait for node is in states: %s' % states)
+        state_of_current_node = self._get_node_state(node)
+        time.sleep(sleep_time)
+        while state_of_current_node not in states:
+            state_of_current_node = self._get_node_state(node)
+            time.sleep(sleep_time)
+            wait_times -= 1
+            if wait_times == 0:
+                break
+        if state_of_current_node in states:
+            is_node_state_the_same_with_specified_state = True
+        else:
+            is_node_state_the_same_with_specified_state = False
+
+        return is_node_state_the_same_with_specified_state
+
     def _get_node_state(self, node):
         nodes = self.compute_adapter.list_nodes(ex_node_ids=[node.id])
         if nodes and len(nodes) == 1:
@@ -2551,7 +2568,15 @@ class AwsEc2Driver(driver.ComputeDriver):
             # if is hybrid_vm, need to stop docker app(container) first, then stop node.
             if image_container_type == CONTAINER_FORMAT_HYBRID_VM:
                 self._stop_container_in_loop(node)
-            self.compute_adapter.ex_stop_node(node)
+
+            if self._if_node_in_specified_states_with_times(node, [NodeState.RUNNING], 2, 60):
+                self.compute_adapter.ex_stop_node(node)
+                self._wait_for_node_in_specified_state(node, NodeState.STOPPED)
+            else:
+                node_current_state = self._get_node_state(node)
+                error_info = 'aws node is in state: %s, can not be started.' % node_current_state
+                LOG.error(error_info)
+                raise Exception(error_info)
         else:
             raise exception.InstanceNotFound(instance_id=instance.uuid)
 
@@ -2571,7 +2596,14 @@ class AwsEc2Driver(driver.ComputeDriver):
         # start server of aws
         node = self._get_provider_node(instance)
         if node:
-            self.compute_adapter.ex_start_node(node)
+            if self._if_node_in_specified_states_with_times(node, [NodeState.STOPPED], 2, 60):
+                self.compute_adapter.ex_start_node(node)
+                self._wait_for_node_in_specified_state(node, NodeState.RUNNING)
+            else:
+                node_current_state = self._get_node_state(node)
+                error_info = 'aws node is in state: %s, can not be started.' % node_current_state
+                LOG.error(error_info)
+                raise Exception(error_info)
         else:
             raise exception.InstanceNotFound(instance_id=instance.uuid)
         LOG.debug('is_hybrid_vm: %s' % instance.metadata.get('is_hybrid_vm', False))
