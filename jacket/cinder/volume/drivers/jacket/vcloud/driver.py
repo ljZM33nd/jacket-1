@@ -2,6 +2,7 @@ import os
 import time
 import shutil
 import urllib2
+import eventlet
 import traceback
 import subprocess
 from oslo.config import cfg
@@ -170,7 +171,7 @@ def _retry_decorator(max_retry_count=-1, inc_sleep_time=10, max_sleep_time=10, e
                         sleep_time = max_sleep_time
 
                     LOG.debug('_retry_decorator func %s times %s sleep time %s', func, retry_count, sleep_time)
-                    time.sleep(sleep_time)
+                    eventlet.greenthread.sleep(sleep_time)
                     return retry_count, sleep_time
                 else:
                     return retry_count, sleep_time
@@ -480,7 +481,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
 
             task = client.clone_volume(dest_volume, src_volume)
             while task['code'] == client_constants.TASK_DOING:
-                time.sleep(30)
+                eventlet.greenthread.sleep(30)
                 task = client.query_task(task)
 
             if task['code'] != client_constants.TASK_SUCCESS:
@@ -886,7 +887,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
                 LOG.debug('begin time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
                 task = client.create_image(image_meta['name'], image_meta['id'])
                 while task['code'] == client_constants.TASK_DOING:
-                    time.sleep(10)
+                    eventlet.greenthread.sleep(10)
                     task = client.query_task(task)
 
                 if task['code'] != client_constants.TASK_SUCCESS:
