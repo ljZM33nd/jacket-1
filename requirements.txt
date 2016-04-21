@@ -4,5 +4,5 @@
 
 #pbr>=1.6 
 # Apache-2.0
-apache-libcloud
+#apache-libcloud
 
