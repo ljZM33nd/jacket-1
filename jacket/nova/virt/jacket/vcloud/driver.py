@@ -373,13 +373,6 @@ class VCloudDriver(driver.ComputeDriver):
         """
         return self.instances.keys()
 
-    def rebuild(self, context, instance, image_meta, injected_files,
-                admin_password, bdms, detach_block_devices,
-                attach_block_devices, network_info=None,
-                recreate=False, block_device_info=None,
-                preserve_ephemeral=False):
-        LOG.debug("rebuild")
-
     def _get_vcloud_vapp_name(self, instance):
         if CONF.vcloud.vcloud_vm_naming_rule == 'openstack_vm_id':
             return instance.uuid

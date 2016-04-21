@@ -73,11 +73,11 @@ class VCloudClient(object):
         # add end for status cache
 
     @property
-    def org(self): 
+    def org(self):
         return self._session.org
 
     @property
-    def username(self): 
+    def username(self):
         return self._session.username
 
     @property
