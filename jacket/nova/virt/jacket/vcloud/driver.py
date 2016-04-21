@@ -21,6 +21,7 @@ import time
 import shutil
 import urllib2
 import sshclient
+import eventlet
 import subprocess
 from oslo.config import cfg
 
@@ -192,7 +193,7 @@ def _retry_decorator(max_retry_count=-1, inc_sleep_time=10, max_sleep_time=10, e
                         sleep_time = max_sleep_time
 
                     LOG.debug('_retry_decorator func %s times %s sleep time %s', func, retry_count, sleep_time)
-                    time.sleep(sleep_time)
+                    eventlet.greenthread.sleep(sleep_time)
                     return retry_count, sleep_time
                 else:
                     return retry_count, sleep_time
@@ -596,7 +597,7 @@ class VCloudDriver(driver.ComputeDriver):
                                         network_info=network_info,
                                         block_device_info=block_device_info)
                 while task['code'] == client_constants.TASK_DOING:
-                    time.sleep(10)
+                    eventlet.greenthread.sleep(10)
                     task = client.query_task(task)
 
                 if task['code'] != client_constants.TASK_SUCCESS:
@@ -756,7 +757,7 @@ class VCloudDriver(driver.ComputeDriver):
                                         block_device_info=block_device_info)
 
                 while task['code'] == client_constants.TASK_DOING:
-                    time.sleep(10)
+                    eventlet.greenthread.sleep(10)
                     task = client.query_task(task)
 
                 if task['code'] != client_constants.TASK_SUCCESS:
@@ -972,7 +973,7 @@ class VCloudDriver(driver.ComputeDriver):
                 break
             except sshclient.SSHError:
                 LOG.debug("wait for vm to initialize network")
-                time.sleep(5)
+                eventlet.greenthread.sleep(5)
 
         cmd3 = "sudo iscsiadm -m session"
         cmd3_status, cmd3_out, cmd3_err = ssh_client.execute(cmd3)
@@ -1239,7 +1240,7 @@ class VCloudDriver(driver.ComputeDriver):
                 LOG.debug('begin time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
                 task = client.create_image(snapshot['name'], image_id)
                 while task['code'] == client_constants.TASK_DOING:
-                    time.sleep(10)
+                    eventlet.greenthread.sleep(10)
                     task = client.query_task(task)
 
                 if task['code'] != client_constants.TASK_SUCCESS:
@@ -1744,7 +1745,7 @@ class VCloudDriver(driver.ComputeDriver):
         while len(agent['agents']) == 0:
             if times==0:
                 break
-            time.sleep(10)
+            eventlet.greenthread.sleep(10)
             agent = neutron_client.list_agents(host=instance_id)
             times = times - 1
         if times==0:

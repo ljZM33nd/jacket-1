@@ -1,4 +1,5 @@
 import time
+import eventlet
 import subprocess
 from oslo.config import cfg
 from oslo.utils import units
@@ -110,7 +111,7 @@ class VCloudClient(object):
 
             retry_times = 60
             while vapp_status != expected_vapp_status and retry_times > 0:
-                time.sleep(3)
+                eventlet.greenthread.sleep(3)
                 the_vapp = self._get_vcloud_vapp(vapp_name)
                 vapp_status = self._get_status_first_vm(the_vapp)
                 LOG.debug('During power off vapp_name: %s, %s' % (vapp_name, vapp_status))
@@ -145,7 +146,7 @@ class VCloudClient(object):
 
             retry_times = 60
             while vapp_status != expected_vapp_status and retry_times > 0:
-                time.sleep(3)
+                eventlet.greenthread.sleep(3)
                 the_vapp = self._get_vcloud_vapp(vapp_name)
                 vapp_status = self._get_status_first_vm(the_vapp)
                 LOG.debug('During power on vapp_name: %s, %s' %

@@ -62,6 +62,7 @@ import six
 import time
 import select
 import socket
+import eventlet
 import paramiko
 
 from nova.openstack.common import log as logging
@@ -260,7 +261,7 @@ class SSH(object):
                 return self.execute("uname")
             except (socket.error, SSHError) as e:
                 LOG.debug("Ssh is still unavailable: %r" % e)
-                time.sleep(interval)
+                eventlet.greenthread.sleep(interval)
             if time.time() > (start_time + timeout):
                 raise SSHTimeout(("Timeout waiting for '%s'") % self.host)
 

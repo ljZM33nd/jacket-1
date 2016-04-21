@@ -1,18 +1,46 @@
 import time
+import eventlet
 import subprocess
 from oslo.config import cfg
 from oslo.utils import units
 
 from nova import exception
+from nova.compute import power_state
 from nova.openstack.common import log as logging
 from nova.virt.jacket.vcloud import constants
 from nova.virt.jacket.vcloud.vcloud import exceptions
 from nova.virt.jacket.vcloud.vcloud import RetryDecorator
+from nova.virt.jacket.vcloud.vcloud import VCLOUD_STATUS
 from nova.virt.jacket.vcloud.vcloud import VCloudAPISession
+from nova.virt.jacket.statuscache.vcloudsynchronizer import HCVCS
+from nova.virt.jacket.statuscache.jacketcache import JacketStatusCache
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 
+status_dict_vapp_to_instance = {
+    VCLOUD_STATUS.FAILED_CREATION: power_state.CRASHED,
+    VCLOUD_STATUS.UNRESOLVED: power_state.NOSTATE,
+    VCLOUD_STATUS.RESOLVED: power_state.NOSTATE,
+    VCLOUD_STATUS.DEPLOYED: power_state.NOSTATE,
+    VCLOUD_STATUS.SUSPENDED: power_state.SUSPENDED,
+    VCLOUD_STATUS.POWERED_ON: power_state.RUNNING,
+    VCLOUD_STATUS.WAITING_FOR_INPUT: power_state.NOSTATE,
+    VCLOUD_STATUS.UNKNOWN: power_state.NOSTATE,
+    VCLOUD_STATUS.UNRECOGNIZED: power_state.NOSTATE,
+    VCLOUD_STATUS.POWERED_OFF: power_state.SHUTDOWN,
+    VCLOUD_STATUS.INCONSISTENT_STATE: power_state.NOSTATE,
+    VCLOUD_STATUS.MIXED: power_state.NOSTATE,
+    VCLOUD_STATUS.DESCRIPTOR_PENDING: power_state.NOSTATE,
+    VCLOUD_STATUS.COPYING_CONTENTS: power_state.NOSTATE,
+    VCLOUD_STATUS.DISK_CONTENTS_PENDING: power_state.NOSTATE,
+    VCLOUD_STATUS.QUARANTINED: power_state.NOSTATE,
+    VCLOUD_STATUS.QUARANTINE_EXPIRED: power_state.NOSTATE,
+    VCLOUD_STATUS.REJECTED: power_state.NOSTATE,
+    VCLOUD_STATUS.TRANSFER_TIMEOUT: power_state.NOSTATE,
+    VCLOUD_STATUS.VAPP_UNDEPLOYED: power_state.NOSTATE,
+    VCLOUD_STATUS.VAPP_PARTIALLY_DEPLOYED: power_state.NOSTATE,
+}
 
 class VCloudClient(object):
 
@@ -32,6 +60,17 @@ class VCloudClient(object):
             retry_count=CONF.vcloud.vcloud_api_retry_count,
             create_session=True,
             scheme=scheme)
+
+        # add for status cache
+        hcvcs = HCVCS(
+           host=CONF.vcloud.vcloud_host_ip,
+           username=CONF.vcloud.vcloud_host_username,
+           org=CONF.vcloud.vcloud_org,
+           password=CONF.vcloud.vcloud_host_password,
+           scheme="https")
+
+        self.cache = JacketStatusCache(hcvcs)
+        # add end for status cache
 
     @property
     def org(self): 
@@ -110,7 +149,7 @@ class VCloudClient(object):
 
             retry_times = 60
             while vapp_status != expected_vapp_status and retry_times > 0:
-                time.sleep(3)
+                eventlet.greenthread.sleep(3)
                 the_vapp = self._get_vcloud_vapp(vapp_name)
                 vapp_status = self._get_status_first_vm(the_vapp)
                 LOG.debug('During power off vapp_name: %s, %s' % (vapp_name, vapp_status))
@@ -145,7 +184,7 @@ class VCloudClient(object):
 
             retry_times = 60
             while vapp_status != expected_vapp_status and retry_times > 0:
-                time.sleep(3)
+                eventlet.greenthread.sleep(3)
                 the_vapp = self._get_vcloud_vapp(vapp_name)
                 vapp_status = self._get_status_first_vm(the_vapp)
                 LOG.debug('During power on vapp_name: %s, %s' %
