@@ -606,7 +606,7 @@ class VCloudDriver(driver.ComputeDriver):
             self._binding_host(context, network_info, instance.uuid)
             self.instances[instance.uuid] = instance
         except Exception as e:
-            msg = _("Failed to spawn reason %s, rolling back") % e
+            msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
             undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
 
@@ -771,7 +771,7 @@ class VCloudDriver(driver.ComputeDriver):
                 LOG.error(msg)
                 raise exception.NovaException(msg)
         except Exception as e:
-            msg = _("Failed to spawn reason %s, rolling back") % e
+            msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
             undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
 
@@ -783,7 +783,7 @@ class VCloudDriver(driver.ComputeDriver):
         LOG.debug(_("network_info is %s") % network_info)
         LOG.debug(_("block_device_info is %s") % block_device_info)
 
-        LOG.info('begin time of vcloud create vm is %s' % (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
+        LOG.info('begin time of vcloud create vm %s is %s' % (instance.display_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 
         if not instance.image_ref:
             self._spawn_from_volume(context, instance, image_meta, injected_files,
@@ -791,7 +791,7 @@ class VCloudDriver(driver.ComputeDriver):
         else:
             self._spawn_from_image(context, instance, image_meta, injected_files,
                                     admin_password, network_info, block_device_info)
-        LOG.info('end time of vcloud create vm is %s' % (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
+        LOG.info('end time of vcloud create vm %s is %s' % (instance.display_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 
     def _update_instance_progress(self, context, instance, step, total_steps):
         """Update instance progress percent to reflect current step number
@@ -1258,7 +1258,7 @@ class VCloudDriver(driver.ComputeDriver):
                         self._update_vm_task_state(instance, task_state=instance.task_state)
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('snapshot failed,reason %s' % e)
+                LOG.error('snapshot instance %s failed,reason %s' % (instance.display_name, e))
 
     def post_interrupted_snapshot_cleanup(self, context, instance):
         """Cleans up any resources left after an interrupted snapshot.
@@ -1290,7 +1290,7 @@ class VCloudDriver(driver.ComputeDriver):
                 client.pause_container()
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('pause failed,reason %s' % e)
+                LOG.error('pause vapp %s failed,reason %s' % (vapp_name, e))
 
     def unpause(self, instance):
         try:
@@ -1302,10 +1302,7 @@ class VCloudDriver(driver.ComputeDriver):
                 client.unpause_container()
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('unpause failed,reason %s' % e)
-
-    def suspend(self, instance):
-        LOG.debug("suspend")
+                LOG.error('unpause vapp %s failed,reason %s' % (vapp_name, e))
 
     def resume(self, context, instance, network_info, block_device_info=None):
         LOG.debug("resume")
@@ -1337,16 +1334,16 @@ class VCloudDriver(driver.ComputeDriver):
                 vapp_ip = self.get_vapp_ip(vapp_name)
                 client = Client(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.stop_container()
-                LOG.debug("stop container sucessful for instance %s" % instance.uuid)
+                LOG.debug("stop container sucessful for instance %s" % instance.display_name)
 
             self._vcloud_client.power_off_vapp(vapp_name)
         except Exception as e:
-            msg = 'power off instanc %s failed, reason %s' % (instance.uuid, e)
+            msg = 'power off instanc %s failed, reason %s' % (instance.display_name, e)
             LOG.error(msg)
             raise exception.NovaException(msg)
 
     def power_on(self, context, instance, network_info, block_device_info):
-        LOG.debug('begin power on instance: %s' % instance.uuid)
+        LOG.debug('begin power on instance: %s' % instance.display_name)
 
         try:
             vapp_name = self._get_vcloud_vapp_name(instance)
@@ -1358,7 +1355,7 @@ class VCloudDriver(driver.ComputeDriver):
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.start_container(network_info = network_info, block_device_info = block_device_info)
         except Exception as e:
-            msg = 'power on instance %s failed, reason %s' % (instance.uuid, e)
+            msg = 'power on instance %s failed, reason %s' % (instance.display_name, e)
             LOG.error(msg)
             raise exception.NovaException(msg)
 

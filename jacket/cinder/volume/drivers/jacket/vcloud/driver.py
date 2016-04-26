@@ -884,7 +884,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 LOG.debug("vapp %s(ip: %s) hybrid service has been up", clone_vapp_name, vapp_ip)
 
-                LOG.debug('begin time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                LOG.debug('begin time of create image is %s' % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
                 task = client.create_image(image_meta['name'], image_meta['id'])
                 while task['code'] == client_constants.TASK_DOING:
                     eventlet.greenthread.sleep(10)
@@ -894,13 +894,14 @@ class VCloudVolumeDriver(driver.VolumeDriver):
                     LOG.error(task['message'])
                     raise exception.CinderException(task['message'])
                 else:
-                    LOG.debug('end time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                    LOG.debug('end time of create image is %s' % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
                 image_info = client.image_info(image_meta['name'], image_meta['id'])
                 if not image_info:
                     LOG.error('cannot get image info')
                     raise exception.CinderException('cannot get image info')
 
+                LOG.debug('begin time of image_utils upload_volume %s' % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
                 with image_utils.temporary_file() as tmp:
                     with fileutils.file_open(tmp, 'wb+') as f:
                         f.truncate(image_info['size'])
@@ -909,6 +910,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
                                                   image_meta,
                                                   tmp,
                                                   volume_format=image_meta['disk_format'])
+                LOG.debug('end time of image_utils upload_volume %s' % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
                 undo_mgr.cancel_undo(_power_off_vapp)
                 self._vcloud_client.power_off_vapp(clone_vapp_name)
