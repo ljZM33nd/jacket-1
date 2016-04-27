@@ -2190,12 +2190,12 @@ class AwsEc2Driver(driver.ComputeDriver):
 
         """
         # xxx(wangfeng):
-        return {'vcpus': 32,
-                'memory_mb': 164403,
-                'local_gb': 5585,
+        return {'vcpus': 10000,
+                'memory_mb': 100000000,
+                'local_gb': 100000000,
                 'vcpus_used': 0,
-                'memory_mb_used': 69005,
-                'local_gb_used': 3479,
+                'memory_mb_used': 1000,
+                'local_gb_used': 1000,
                 'hypervisor_type': 'aws',
                 'hypervisor_version': 5005000,
                 'hypervisor_hostname': nodename,
