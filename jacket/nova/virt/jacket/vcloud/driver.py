@@ -845,7 +845,7 @@ class VCloudDriver(driver.ComputeDriver):
                 self._vcloud_client.delete_metadata_iso(vapp_name)
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('_do_destroy_vm failed,reason %s' % e)
+                LOG.error('_do_destroy_vm vapp %s failed,reason %s' % (vapp_name, e))
 
     def destroy(self, context, instance, network_info, block_device_info=None,
                destroy_disks=True, migrate_data=None):
@@ -874,7 +874,7 @@ class VCloudDriver(driver.ComputeDriver):
 
     def reboot(self, context, instance, network_info, reboot_type,
                block_device_info=None, bad_volumes_callback=None):
-        LOG.debug('[vcloud nova driver] begin reboot instance: %s' % instance.uuid)
+        LOG.debug('begin reboot instance: %s' % instance.display_name)
 
         try:
             vapp_name = self._get_vcloud_vapp_name(instance)
@@ -887,7 +887,7 @@ class VCloudDriver(driver.ComputeDriver):
                 client.restart_container(network_info=network_info, block_device_info=block_device_info)
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('reboot failed,reason %s' % e)
+                LOG.error('reboot vapp %s failed,reason %s' % (vapp_name, e))
 
     def get_console_pool_info(self, console_type):
         LOG.debug("get_console_pool_info")
@@ -1326,19 +1326,19 @@ class VCloudDriver(driver.ComputeDriver):
         LOG.debug("unrescue")
 
     def power_off(self, instance, shutdown_timeout=0, shutdown_attempts=0):
-        LOG.debug('begin power off instance: %s' % instance.uuid)
+        LOG.debug('begin power off instance: %s' % instance.display_name)
 
         try:
             vapp_name = self._get_vcloud_vapp_name(instance)
             if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM:
                 vapp_ip = self.get_vapp_ip(vapp_name)
                 client = Client(vapp_ip, CONF.vcloud.hybrid_service_port)
+                self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.stop_container()
                 LOG.debug("stop container sucessful for instance %s" % instance.display_name)
-
             self._vcloud_client.power_off_vapp(vapp_name)
         except Exception as e:
-            msg = 'power off instanc %s failed, reason %s' % (instance.display_name, e)
+            msg = 'power off vapp %s failed, reason %s' % (vapp_name, e)
             LOG.error(msg)
             raise exception.NovaException(msg)
 
@@ -1355,7 +1355,7 @@ class VCloudDriver(driver.ComputeDriver):
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.start_container(network_info = network_info, block_device_info = block_device_info)
         except Exception as e:
-            msg = 'power on instance %s failed, reason %s' % (instance.display_name, e)
+            msg = 'power on vapp %s failed, reason %s' % (vapp_name, e)
             LOG.error(msg)
             raise exception.NovaException(msg)
 
@@ -1494,7 +1494,7 @@ class VCloudDriver(driver.ComputeDriver):
 
     def refresh_provider_fw_rules(self):
         LOG.debug("refresh_provider_fw_rules")
-        
+
     def refresh_instance_security_rules(self, instance):
         LOG.debug("refresh_instance_security_rules")
         return True
