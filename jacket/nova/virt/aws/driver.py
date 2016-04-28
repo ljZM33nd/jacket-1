@@ -35,6 +35,9 @@ import adapter
 import exception_ex
 from nova.virt.aws import image_utils
 
+from jacketstatuscache.awssynchronizer import HCAWSS
+from jacketstatuscache.jacketcache import JacketStatusCache
+
 
 hybrid_cloud_opts = [
 
@@ -291,6 +294,11 @@ class AwsEc2Driver(driver.ComputeDriver):
                 self.provider_security_group_id = None
             else:
                 self.provider_security_group_id = CONF.provider_opts.security_group
+
+        hcawss = HCAWSS(CONF.provider_opts.access_key_id,
+                        secret=CONF.provider_opts.secret_key,
+                        region=CONF.provider_opts.region, secure=False)
+        self.cache = JacketStatusCache(hcawss)
 
     def _get_auth(self, key_data, key_name):
         return None
@@ -2250,9 +2258,17 @@ class AwsEc2Driver(driver.ComputeDriver):
     def get_info(self, instance):
         LOG.debug('begin get the instance %s info ' % instance.uuid)
         state = power_state.NOSTATE
-
+	provider_node_id = None
         # xxx(wangfeng): it is too slow to connect to aws to get info. so I delete it
 
+        provider_node_id = self._get_provider_node_id(instance)
+
+	if provider_node_id:
+            state = self.cache.query_status(provider_node_id)
+        if state:
+            LOG.debug('end get the instance %s info ,provider node is %s ' % (instance.uuid, provider_node_id))
+
+        '''
         node = self._get_provider_node(instance)
         if node:
             LOG.debug('end get the instance %s info ,provider node is %s ' % (instance.uuid,node.id))
@@ -2261,6 +2277,7 @@ class AwsEc2Driver(driver.ComputeDriver):
                 state = AWS_POWER_STATE[node_status]
             except KeyError:
                 state = power_state.NOSTATE
+        '''
 
         return {'state': state,
                 'max_mem': 0,
