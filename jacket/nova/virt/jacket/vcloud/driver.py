@@ -440,6 +440,8 @@ class VCloudDriver(driver.ComputeDriver):
 
             if 'container_format' in image_meta and image_meta['container_format'] == constants.HYBRID_VM:
                 is_hybrid_vm = True
+            else:
+                is_hybrid_vm = False
 
             # update port bind host
             self._binding_host(context, network_info, instance.uuid)
@@ -778,11 +780,6 @@ class VCloudDriver(driver.ComputeDriver):
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
         """Create VM instance."""
-        LOG.debug(_("image meta is:%s") % image_meta)
-        LOG.debug(_("instance is:%s") % instance)
-        LOG.debug(_("network_info is %s") % network_info)
-        LOG.debug(_("block_device_info is %s") % block_device_info)
-
         LOG.info('begin time of vcloud create vm %s is %s' % (instance.display_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())))
 
         if not instance.image_ref:
@@ -844,8 +841,7 @@ class VCloudDriver(driver.ComputeDriver):
             if instance.system_metadata.get('image_container_format') != constants.HYBRID_VM:
                 self._vcloud_client.delete_metadata_iso(vapp_name)
         except Exception as e:
-            with excutils.save_and_reraise_exception():
-                LOG.error('_do_destroy_vm vapp %s failed,reason %s' % (vapp_name, e))
+            LOG.error('_do_destroy_vm vapp %s failed,reason %s' % (vapp_name, e))
 
     def destroy(self, context, instance, network_info, block_device_info=None,
                destroy_disks=True, migrate_data=None):
@@ -1207,9 +1203,7 @@ class VCloudDriver(driver.ComputeDriver):
         return metadata
 
     def snapshot(self, context, instance, image_id, update_task_state):
-        LOG.debug("context:%s", vars(context))
-        LOG.debug("instance:%s", vars(instance))
-        LOG.debug("image_id:%s update_task_state:%s", image_id, update_task_state)
+        LOG.debug("snapshot %s image_id:%s update_task_state:%s", instance.display_name, image_id, update_task_state)
 
         try:
             if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM:
@@ -1230,7 +1224,7 @@ class VCloudDriver(driver.ComputeDriver):
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 LOG.debug("vapp %s(ip: %s) hybrid service has been up", vapp_name, vapp_ip)
 
-                LOG.debug('begin time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                LOG.debug('begin time of create image for vapp %s is %s', vapp_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
                 task = client.create_image(snapshot['name'], image_id)
                 while task['code'] == client_constants.TASK_DOING:
                     eventlet.greenthread.sleep(10)
@@ -1240,12 +1234,15 @@ class VCloudDriver(driver.ComputeDriver):
                     LOG.error(task['message'])
                     raise exception.NovaException(task['message'])
                 else:
-                    LOG.debug('end time of create image is %s', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+                    LOG.debug('end time of create image for vapp %s is %s', vapp_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
 
                 image_info = client.image_info(snapshot['name'], image_id)
                 if not image_info:
-                    LOG.error('cannot get image info')
-                    raise exception.NovaException('cannot get image info')
+                    msg = 'cannot get image info for vapp %s' % vapp_name
+                    LOG.error(msg)
+                    raise exception.NovaException(msg)
+
+                LOG.debug('begin image service update for vapp %s', vapp_name)
 
                 update_task_state(task_state=task_states.IMAGE_UPLOADING,
                                   expected_state=task_states.IMAGE_PENDING_UPLOAD)
@@ -1256,9 +1253,11 @@ class VCloudDriver(driver.ComputeDriver):
                         f.truncate(image_info['size'])
                         image_service.update(context, image_id, metadata, f)
                         self._update_vm_task_state(instance, task_state=instance.task_state)
+
+            LOG.debug("snapshot vapp %s image_id:%s name: %s sucessful", vapp_name, image_id, snapshot['name'])
         except Exception as e:
             with excutils.save_and_reraise_exception():
-                LOG.error('snapshot instance %s failed,reason %s' % (instance.display_name, e))
+                LOG.error('snapshot vapp %s failed,reason %s' % (vapp_name, e))
 
     def post_interrupted_snapshot_cleanup(self, context, instance):
         """Cleans up any resources left after an interrupted snapshot.
@@ -1367,12 +1366,12 @@ class VCloudDriver(driver.ComputeDriver):
 
     def get_available_resource(self, nodename):
         LOG.debug("get_available_resource")
-        return {'vcpus': 32,
-                'memory_mb': 164403,
-                'local_gb': 5585,
+        return {'vcpus': 10000,
+                'memory_mb': 100000000,
+                'local_gb': 100000000,
                 'vcpus_used': 0,
-                'memory_mb_used': 69005,
-                'local_gb_used': 3479,
+                'memory_mb_used': 1000,
+                'local_gb_used': 1000,
                 'hypervisor_type': 'vcloud',
                 'hypervisor_version': 5005000,
                 'hypervisor_hostname': nodename,

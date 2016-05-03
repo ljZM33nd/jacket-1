@@ -194,7 +194,8 @@ class VCloudClient(object):
 
         for vm_network_infos in vms_network_infos:
             for vm_network_info in vm_network_infos:
-                if vm_network_info['ip']:
+                if vm_network_info['ip'] and \
+                    (vm_network_info['network_name'] == CONF.vcloud.provider_tunnel_network_name):
                     return vm_network_info['ip']
 
         return None
