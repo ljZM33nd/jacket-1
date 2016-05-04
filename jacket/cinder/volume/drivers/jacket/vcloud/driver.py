@@ -100,6 +100,8 @@ vcloudapi_opts = [
                help='The provider network name which base provider network use.'),
     cfg.StrOpt('provider_tunnel_network_name',
                help='The provider network name which tunnel provider network use.'),
+    cfg.StrOpt('registry_url',
+           help='The registry url of the hybrid service.'),
 ]
 
 vcloudvgw_opts = [

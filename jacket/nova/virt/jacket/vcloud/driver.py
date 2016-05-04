@@ -144,7 +144,9 @@ vcloudapi_opts = [
                help='The config location for hybrid vm.'),
     cfg.StrOpt('hybrid_service_port',
                default = '7127',
-               help='The port of the hybrid service.')
+               help='The port of the hybrid service.'),
+    cfg.StrOpt('registry_url',
+           help='The registry url of the hybrid service.'),
 ]
 
 status_dict_vapp_to_instance = {
@@ -525,7 +527,7 @@ class VCloudDriver(driver.ComputeDriver):
                 if result:
                     self._vcloud_client.attach_disk_to_vm(vapp_name, disk_ref)
                 else:
-                    msg = _('Unable to find volume %s to instance') % disk_name
+                    msg = _('Unable to find volume %s to vapp %s') % (disk_name, vapp_name)
                     LOG.error(msg)
                     raise exception.NovaException(msg)
 
@@ -545,6 +547,8 @@ class VCloudDriver(driver.ComputeDriver):
                 LOG.info("To inject file %s for vapp %s", CONF.vcloud.dst_path, vapp_name)
                 file_data = 'rabbit_userid=%s\nrabbit_password=%s\nrabbit_host=%s\n' % (CONF.rabbit_userid, CONF.rabbit_password, rabbit_host)
                 file_data += 'host=%s\ntunnel_cidr=%s\nroute_gw=%s\n' % (instance.uuid,CONF.vcloud.tunnel_cidr,CONF.vcloud.route_gw)
+                file_data += 'registry_url =%s\n' % CONF.vcloud.registry_url
+
                 client.inject_file(CONF.vcloud.dst_path, file_data = file_data)
 
                 bdms = block_device_info.get('block_device_mapping')
@@ -690,7 +694,7 @@ class VCloudDriver(driver.ComputeDriver):
                     attached_disk_names.append(vcloud_volume_name)
                     undo_mgr.undo_with(_detach_disks_to_vm)
                 else:
-                    msg = _('Unable to find volume %s to instance')% vcloud_volume_name
+                    msg = _('Unable to find volume %s to vapp %s')% (vcloud_volume_name, vapp_name)
                     LOG.error(msg)
                     raise exception.NovaException(msg)
 
@@ -739,6 +743,8 @@ class VCloudDriver(driver.ComputeDriver):
                 LOG.info("To inject file %s for vapp %s", CONF.vcloud.dst_path, vapp_name)
                 file_data = 'rabbit_userid=%s\nrabbit_password=%s\nrabbit_host=%s\n' % (CONF.rabbit_userid, CONF.rabbit_password, rabbit_host)
                 file_data += 'host=%s\ntunnel_cidr=%s\nroute_gw=%s\n' % (instance.uuid,CONF.vcloud.tunnel_cidr,CONF.vcloud.route_gw)
+                file_data += 'registry_url =%s\n' % CONF.vcloud.registry_url
+
                 client.inject_file(CONF.vcloud.dst_path, file_data = file_data)
 
                 LOG.info("To create container %s for vapp %s time %s", volume_image_metadata.get('image_name'), vapp_name,
