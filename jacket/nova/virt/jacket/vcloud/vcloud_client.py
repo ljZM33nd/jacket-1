@@ -133,7 +133,7 @@ class VCloudClient(object):
 
     def power_off_vapp(self, vapp_name):
         @RetryDecorator(max_retry_count=60,
-                        exceptions=exception.NovaException)
+                        exceptions=exceptions.NoneException)
         def _power_off(vapp_name):
             expected_vapp_status = constants.VM_POWER_OFF_STATUS
             the_vapp = self._get_vcloud_vapp(vapp_name)
@@ -143,7 +143,7 @@ class VCloudClient(object):
 
             task_stop = self._invoke_vapp_api(the_vapp, "undeploy")
             if not task_stop:
-                raise exception.NovaException(
+                raise exceptions.NoneException(
                     "power off vapp failed, task")
             self._session.wait_for_task(task_stop)
 
@@ -168,7 +168,7 @@ class VCloudClient(object):
 
     def power_on_vapp(self, vapp_name):
         @RetryDecorator(max_retry_count=60,
-                        exceptions=exception.NovaException)
+                        exceptions=exceptions.NoneException)
         def _power_on(vapp_name):
             the_vapp = self._get_vcloud_vapp(vapp_name)
 
@@ -179,7 +179,7 @@ class VCloudClient(object):
 
             task = self._invoke_vapp_api(the_vapp, "poweron")
             if not task:
-                raise exception.NovaException("power on vapp failed, task")
+                raise exceptions.NoneException("power on vapp failed, task")
             self._session.wait_for_task(task)
 
             retry_times = 60
@@ -261,12 +261,12 @@ class VCloudClient(object):
 
     def attach_disk_to_vm(self, vapp_name, disk_ref):
         @RetryDecorator(max_retry_count=60,
-                        exceptions=exception.NovaException)
+                        exceptions=exceptions.NoneException)
         def _attach_disk(vapp_name, disk_ref):
             the_vapp = self._get_vcloud_vapp(vapp_name)
             task = the_vapp.attach_disk_to_vm(disk_ref)
             if not task:
-                raise exception.NovaException(
+                raise exceptions.NoneException(
                     "Unable to attach disk to vm %s" % vapp_name)
             else:
                 self._session.wait_for_task(task)
@@ -276,12 +276,12 @@ class VCloudClient(object):
 
     def detach_disk_from_vm(self, vapp_name, disk_ref):
         @RetryDecorator(max_retry_count=60,
-                        exceptions=exception.NovaException)
+                        exceptions=exceptions.NoneException)
         def _detach_disk(vapp_name, disk_ref):
             the_vapp = self._get_vcloud_vapp(vapp_name)
             task = the_vapp.detach_disk_from_vm(disk_ref)
             if not task:
-                raise exception.NovaException(
+                raise exceptions.NoneException(
                     "Unable to detach disk from vm %s" % vapp_name)
             else:
                 self._session.wait_for_task(task)

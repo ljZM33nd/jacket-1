@@ -614,7 +614,9 @@ class VCloudDriver(driver.ComputeDriver):
         except Exception as e:
             msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
-            undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
+            #for remain vapp to debug
+            #undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
+            raise exception.NovaException(msg)
 
     def _spawn_from_volume(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -781,7 +783,9 @@ class VCloudDriver(driver.ComputeDriver):
         except Exception as e:
             msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
-            undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
+            #for remain vapp to debug
+            #undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
+            raise exception.NovaException(msg)
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -851,7 +855,7 @@ class VCloudDriver(driver.ComputeDriver):
 
     def destroy(self, context, instance, network_info, block_device_info=None,
                destroy_disks=True, migrate_data=None):
-        LOG.debug('[vcloud nova driver] destroy: %s' % instance.uuid)
+        LOG.debug('vcloud nova driver destroy: %s' % instance.display_name)
         self._do_destroy_vm(context, instance, network_info, block_device_info,
                             destroy_disks, migrate_data)
 
@@ -876,7 +880,7 @@ class VCloudDriver(driver.ComputeDriver):
 
     def reboot(self, context, instance, network_info, reboot_type,
                block_device_info=None, bad_volumes_callback=None):
-        LOG.debug('begin reboot instance: %s' % instance.display_name)
+        LOG.debug('vcloud driver reboot instance: %s' % instance.display_name)
 
         try:
             vapp_name = self._get_vcloud_vapp_name(instance)

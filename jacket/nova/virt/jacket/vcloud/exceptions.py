@@ -132,6 +132,9 @@ class NoPermissionException(VCloudDriverException):
     code = 403
 
 
+class NoneException(VCloudDriverException):
+    msg_fmt = _("Result return None.")
+
 class NotAuthenticatedException(VCloudDriverException):
     msg_fmt = _("Not Authenticated.")
     code = 403
