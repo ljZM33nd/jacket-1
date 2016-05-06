@@ -320,8 +320,9 @@ class AwsEc2Driver(driver.ComputeDriver):
             LOG.error('list nodes failed, Nodes are null!')
             return instances
         for node in nodes:
-            instance_uuid = node.extra.get('tags').get('hybrid_cloud_instance_id')
-            instances.append(instance_uuid)
+            if node.state != NodeState.TERMINATED:
+                instance_uuid = node.extra.get('tags').get('hybrid_cloud_instance_id')
+                instances.append(instance_uuid)
 
         return instances
 
@@ -567,7 +568,6 @@ class AwsEc2Driver(driver.ComputeDriver):
         if provider_image is None:
             image_uuid = self._get_image_id_from_meta(image_meta)
             LOG.error('Get image %s error at provider cloud' % image_uuid)
-            return
 
         # 1. if provider_image do not exist,, import image first
         vm_task_state = instance.task_state
@@ -1158,6 +1158,7 @@ class AwsEc2Driver(driver.ComputeDriver):
             if not provider_nodes:
                 error_info = 'There is no node created in provider. node id: %s' % provider_node.id
                 LOG.error(error_info)
+                time.sleep(10)
                 continue
             else:
                 provider_node = provider_nodes[0]
@@ -2949,7 +2950,7 @@ class AwsEc2Driver(driver.ComputeDriver):
 
         return clients
 
-    @RetryDecorator(max_retry_count=50, inc_sleep_time=5,max_sleep_time=60,
+    @RetryDecorator(max_retry_count=100, inc_sleep_time=5,max_sleep_time=60,
                         exceptions=(errors.APIError, errors.NotFound, errors.ConnectionError, errors.InternalError))
     def _clients_wait_hybrid_service_up(self, clients):
         is_docker_up = False
