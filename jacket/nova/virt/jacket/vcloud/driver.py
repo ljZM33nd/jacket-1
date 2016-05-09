@@ -581,7 +581,7 @@ class VCloudDriver(driver.ComputeDriver):
                         devs = ndevs - odevs
 
                         volume = self._cinder_api.get(context, volume_id)
-                        bdm['real_device'] = devs[0]
+                        bdm['real_device'] = list(devs)[0]
                         bdm['size'] = volume['size']
                     else:
                         msg = _('Unable to find volume %s to instance') % vcloud_volume_name
@@ -735,7 +735,7 @@ class VCloudDriver(driver.ComputeDriver):
 
                         volume = self._cinder_api.get(context, volume_id)
 
-                        bdm['real_device'] = devs[0]
+                        bdm['real_device'] = list(devs)[0]
                         bdm['size'] = volume['size']
                     else:
                         msg = _('Unable to find volume %s to instance') % vcloud_volume_name
