@@ -2259,12 +2259,12 @@ class AwsEc2Driver(driver.ComputeDriver):
     def get_info(self, instance):
         LOG.debug('begin get the instance %s info ' % instance.uuid)
         state = power_state.NOSTATE
-	provider_node_id = None
+        provider_node_id = None
         # xxx(wangfeng): it is too slow to connect to aws to get info. so I delete it
 
         provider_node_id = self._get_provider_node_id(instance)
 
-	if provider_node_id:
+        if provider_node_id:
             state = self.cache.query_status(provider_node_id)
         if state:
             LOG.debug('end get the instance %s info ,provider node is %s ' % (instance.uuid, provider_node_id))
