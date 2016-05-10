@@ -1344,8 +1344,9 @@ class VCloudDriver(driver.ComputeDriver):
                 client = Client(vapp_ip, CONF.vcloud.hybrid_service_port)
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.stop_container()
-                LOG.debug("stop container sucessful for instance %s" % instance.display_name)
+                LOG.debug("stop container for vapp %s sucessful" % vapp_name)
             self._vcloud_client.power_off_vapp(vapp_name)
+            LOG.debug('power off vapp %s successful' % vapp_name)
         except Exception as e:
             msg = 'power off vapp %s failed, reason %s' % (vapp_name, e)
             LOG.error(msg)
@@ -1358,11 +1359,18 @@ class VCloudDriver(driver.ComputeDriver):
             vapp_name = self._get_vcloud_vapp_name(instance)
             self._vcloud_client.power_on_vapp(vapp_name)
 
+            bdms = block_device_info.get('block_device_mapping')
+            for bdm in bdms:
+                volume_id = bdm['connection_info']['data']['volume_id']
+                volume = self._cinder_api.get(context, volume_id)
+                bdm['size'] = volume['size']
+
             if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM: 
                 vapp_ip = self.get_vapp_ip(vapp_name)                
                 client = Client(vapp_ip, CONF.vcloud.hybrid_service_port)
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.start_container(network_info = network_info, block_device_info = block_device_info)
+            LOG.debug('power on vapp: %s successful' % vapp_name)
         except Exception as e:
             msg = 'power on vapp %s failed, reason %s' % (vapp_name, e)
             LOG.error(msg)
