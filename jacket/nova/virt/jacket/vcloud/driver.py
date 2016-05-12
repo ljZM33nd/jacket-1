@@ -285,11 +285,11 @@ class VCloudDriver(driver.ComputeDriver):
         super(VCloudDriver, self).__init__(virtapi)
 
         #begin for cleaning garbage disk
-        disk_refs = self._vcloud_client._invoke_api('get_diskRefs',
-                                     self._vcloud_client._get_vcloud_vdc())
-        for disk_ref in disk_refs:
+        #disk_refs = self._vcloud_client._invoke_api('get_diskRefs',
+        #                             self._vcloud_client._get_vcloud_vdc())
+        #for disk_ref in disk_refs:
             #self._vcloud_client.delete_volume(disk_ref.get_name())
-            pass
+            #pass
         #end for cleaning garbage disk
 
     def init_host(self, host):
@@ -547,7 +547,7 @@ class VCloudDriver(driver.ComputeDriver):
                 LOG.info("To inject file %s for vapp %s", CONF.vcloud.dst_path, vapp_name)
                 file_data = 'rabbit_userid=%s\nrabbit_password=%s\nrabbit_host=%s\n' % (CONF.rabbit_userid, CONF.rabbit_password, rabbit_host)
                 file_data += 'host=%s\ntunnel_cidr=%s\nroute_gw=%s\n' % (instance.uuid,CONF.vcloud.tunnel_cidr,CONF.vcloud.route_gw)
-                file_data += 'registry_url =%s\n' % CONF.vcloud.registry_url
+                file_data += 'registry_url=%s\n' % CONF.vcloud.registry_url
 
                 client.inject_file(CONF.vcloud.dst_path, file_data = file_data)
 
@@ -614,9 +614,7 @@ class VCloudDriver(driver.ComputeDriver):
         except Exception as e:
             msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
-            #for remain vapp to debug
-            #undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
-            raise exception.NovaException(msg)
+            undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
 
     def _spawn_from_volume(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -783,9 +781,7 @@ class VCloudDriver(driver.ComputeDriver):
         except Exception as e:
             msg = _("Failed to spawn vapp %s reason %s, rolling back") % (vapp_name, e)
             LOG.error(msg)
-            #for remain vapp to debug
-            #undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
-            raise exception.NovaException(msg)
+            undo_mgr.rollback_and_reraise(msg=msg, instance=instance)
 
     def spawn(self, context, instance, image_meta, injected_files,
               admin_password, network_info=None, block_device_info=None):
@@ -1365,8 +1361,8 @@ class VCloudDriver(driver.ComputeDriver):
                 volume = self._cinder_api.get(context, volume_id)
                 bdm['size'] = volume['size']
 
-            if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM: 
-                vapp_ip = self.get_vapp_ip(vapp_name)                
+            if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM:
+                vapp_ip = self.get_vapp_ip(vapp_name)
                 client = Client(vapp_ip, CONF.vcloud.hybrid_service_port)
                 self._wait_hybrid_service_up(vapp_ip, CONF.vcloud.hybrid_service_port)
                 client.start_container(network_info = network_info, block_device_info = block_device_info)
