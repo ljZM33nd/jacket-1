@@ -463,7 +463,11 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         elif len(provider_volumes) > 1:
             LOG.error('volume %s has more than one provider_volume' % volume['id'])
             raise exception_ex.ProviderMultiVolumeError(volume_id=volume['id'])
-        delete_ret = self.adpter.destroy_volume(provider_volumes[0])
+        try:
+            delete_ret = self.adpter.destroy_volume(provider_volumes[0])
+        except Exception, e:
+            LOG.warning('can not delete provider volume: %s' % provider_volumes[0])
+
         LOG.info("deleted volume return%d" % delete_ret)
 
     def _get_provider_volumeID_from_snapshot(self, snapshot):
