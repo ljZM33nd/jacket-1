@@ -2774,6 +2774,7 @@ class AwsEc2Driver(driver.ComputeDriver):
             try:
                 created_task = client.create_container(image_name, image_uuid, inject_files=injected_files, admin_password=admin_password,
                                 network_info=network_info, block_device_info=block_device_info)
+                break
             except Exception, e:
                 tmp_exception = e
                 LOG.error('exception when create container, exception: %s' % traceback.format_exc(e))
