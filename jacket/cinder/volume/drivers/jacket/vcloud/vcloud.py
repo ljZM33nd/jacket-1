@@ -1095,8 +1095,7 @@ class VCloudAPISession(object):
                 raise loopingcall.LoopingCallDone(task_info)
             else:
                 raise exceptions.VCloudDriverException(
-                    "Task execute failed, task:%s",
-                    task)
+                    "Task execute failed, task:%s" % task)
 
     def wait_for_lease_ready(self, lease):
         """Waits for the given lease to be ready.
