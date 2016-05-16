@@ -292,7 +292,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
         volume_name = volume['display_name']
         vcloud_volume_name = self._get_vcloud_volume_name(volume['id'],volume_name)
 
-        LOG.debug('Creating volume %(name)s of size %(size)s Gb',
+        LOG.debug('Creating vcloud volume %(name)s of size %(size)s Gb',
                   {'name': vcloud_volume_name, 'size': volume['size']})
 
         self._vcloud_client.create_volume(vcloud_volume_name, volume['size'])
@@ -301,7 +301,7 @@ class VCloudVolumeDriver(driver.VolumeDriver):
         """Delete a volume."""
         volume_name = volume['display_name']
         vcloud_volume_name = self._get_vcloud_volume_name(volume['id'], volume_name)
-        LOG.debug('Deleting volume %s', vcloud_volume_name)
+        LOG.debug('Deleting vcloud volume %s', vcloud_volume_name)
 
         self._vcloud_client.delete_volume(vcloud_volume_name)
 

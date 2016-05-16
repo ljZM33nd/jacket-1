@@ -353,6 +353,9 @@ class VCA(sdk_vca):
                 % (response)
             raise exceptions.VCloudDriverException(excep_msg)
 
+    #sometimes get_vdc return NoneType, add info for debug
+    @RetryDecorator(max_retry_count=3,
+                            exceptions=exceptions.NoneException)
     def get_vdc(self, vdc_name):
         if self.vcloud_session and self.vcloud_session.organization:
             refs = filter(lambda ref: ref.name == vdc_name and ref.type_ ==
@@ -365,13 +368,23 @@ class VCA(sdk_vca):
                                             headers=headers,
                                             verify=self.verify)
                 if response.status_code == requests.codes.ok:
-                    return vdcType.parseString(response.content, True)
+                    vcloud_vdc = vdcType.parseString(response.content, True)
+                    if not vcloud_vdc:
+                        raise exceptions.NoneException("Get vdc %s failed" % vdc_name)
+                    else:
+                        return vcloud_vdc
                 elif response.status_code == requests.codes.forbidden:
                     excep_msg = "Get_vdc forbidden, vdc_name:%s" % (vdc_name)
                     raise exceptions.ForbiddenException(excep_msg)
                 else:
                     excep_msg = "Get_vdc failed, response:%s" % (response)
                     raise exceptions.VCloudDriverException(excep_msg)
+            else:
+                LOG.debug("len(refs) %s refs %s" % (len(refs), refs))
+                raise exceptions.NoneException("Get vdc %s failed" % vdc_name)
+        else:
+            LOG.debug("vcloud_session %s org %s" % (self.vcloud_session, self.vcloud_session.organization))
+            raise exceptions.NoneException("Get vdc %s failed" % vdc_name)
 
     def get_vapp_template(self, vdc, vapp_template_name):
         resource_entities = vdc.get_ResourceEntities().get_ResourceEntity()
