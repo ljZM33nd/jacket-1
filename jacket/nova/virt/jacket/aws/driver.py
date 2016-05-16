@@ -2486,6 +2486,11 @@ class AwsEc2Driver(driver.ComputeDriver):
         LOG.debug('image_container_type: %s' % image_container_type)
 
         if image_container_type == CONTAINER_FORMAT_HYBRID_VM:
+            bdms = block_device_info.get('block_device_mapping')
+            for bdm in bdms:
+                volume_id = bdm['connection_info']['data']['volume_id']
+                volume = self._get_provider_volume_id(context, volume_id)
+                bdm['size'] = volume['size']
             LOG.debug('Start to start container.')
             self._start_container_in_loop_clients(node, network_info, block_device_info)
             LOG.debug('End to start container.')
@@ -2855,7 +2860,7 @@ class AwsEc2Driver(driver.ComputeDriver):
         for client in clients:
             try:
                 client.stop_container()
-                LOG.debug('Reboot app success.')
+                LOG.debug('Stop app success.')
                 is_stop = True
                 break
             except Exception, e:
