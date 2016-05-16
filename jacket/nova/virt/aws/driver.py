@@ -813,7 +813,7 @@ class AwsEc2Driver(driver.ComputeDriver):
                                              block_device_info,
                                              image_meta,
                                              injected_files,
-                                             admin_password)
+                                             admin_password,image_meta)
         else:
             # 6 mapp data volume id to provider
             provider_bdm_list = provider_node.extra.get('block_device_mapping')
@@ -1000,6 +1000,29 @@ class AwsEc2Driver(driver.ComputeDriver):
                     is_all_completed = False
                     time.sleep(10)
                     break
+
+    def _get_snapshot_by_tag_image_id(self, image_id):
+        LOG.debug('start to get snapshot by tag image_id: %s' % image_id)
+        provider_snapshot = None
+
+        snapshots = self.compute_adapter.list_snapshots(ex_filters={'tag:hybrid_image_id':image_id})
+        if len(snapshots) >= 1:
+            provider_snapshot = snapshots[0]
+
+        LOG.debug('end to get snapshot: %s' % provider_snapshot)
+        return provider_snapshot
+
+    def _create_data_volume_for_container(self, size, name, location, image_id):
+        snapshot = self._get_snapshot_by_tag_image_id(image_id)
+        if not snapshot:
+            LOG.debug('create blank volume')
+            volume = self.compute_adapter.create_volume(size, name, location=location)
+        else:
+            LOG.debug('create data volume by snapshot: %s' % snapshot)
+            volume = self.compute_adapter.create_volume(size, name, location=location, snapshot=snapshot)
+
+        LOG.debug('end to create data volume: %s' % volume)
+        return volume
 
 
     def _generate_user_data(self, instance):
@@ -1189,7 +1212,8 @@ class AwsEc2Driver(driver.ComputeDriver):
         if provider_image is None:
             image_uuid = self._get_image_id_from_meta(image_meta)
             LOG.error('Get image %s error at provider cloud' % image_uuid)
-            return
+            raise Exception('Get image %s error at provider cloud' % image_uuid)
+            #return
 
         LOG.debug('provider_image: %s' % provider_image)
         provider_size = self._get_provider_node_size(instance.get_flavor())
@@ -1215,7 +1239,8 @@ class AwsEc2Driver(driver.ComputeDriver):
                                              network_info,
                                              block_device_info,
                                              image_meta,
-                                             injected_files, admin_password)
+                                             injected_files, admin_password,
+                                             image_meta)
         LOG.debug('-------------SUCCESS to create hyper service container.---------------')
 
         # reset the original state
@@ -1279,7 +1304,7 @@ class AwsEc2Driver(driver.ComputeDriver):
                                              network_info,
                                              block_device_info,
                                              image_metadata_of_root_volume,
-                                             injected_files, admin_password)
+                                             injected_files, admin_password, image_meta)
         LOG.debug('-------------SUCCESS to create hyper service container.---------------')
 
         #reset the original state
@@ -1307,8 +1332,10 @@ class AwsEc2Driver(driver.ComputeDriver):
 
     def _create_hyper_service_container(self, context, instance, provider_node,
                                         network_info, block_device_info,
-                                        image_metadata, inject_file, admin_password):
+                                        image_metadata, inject_file, admin_password, image_meta):
         LOG.debug('Start to create hyper service container')
+        image_id = image_meta.get('id')
+        LOG.debug('image_id: %s' % image_id)
         instance.metadata['is_hybrid_vm'] = True
         instance.save()
         image_name = self._get_image_name_from_meta(image_metadata)
@@ -1320,9 +1347,11 @@ class AwsEc2Driver(driver.ComputeDriver):
         provider_location = self._get_location()
 
         root_volume = self._get_root_volume(context, block_device_info)
+        volume_name = provider_node.id
         if not root_volume:
             # if not exist hybrid root volume, then it is spawn from image.
-            provider_hybrid_volume = self._create_data_volume_for_container(provider_node, size, provider_location)
+            #provider_hybrid_volume = self._create_data_volume_for_container(provider_node, size, provider_location)
+            provider_hybrid_volume = self._create_data_volume_for_container(size, volume_name, provider_location, image_id)
             try:
                 self._wait_for_volume_is_available(provider_hybrid_volume)
             except Exception, e:
@@ -1335,7 +1364,8 @@ class AwsEc2Driver(driver.ComputeDriver):
             # mapped root volume in aws. if exist mapped root volume of aws, use it directly.
             provider_hybrid_volume = self._get_provider_volume(root_volume.get('id'))
             if not provider_hybrid_volume:
-                provider_hybrid_volume = self._create_data_volume_for_container(provider_node, size, provider_location)
+                #provider_hybrid_volume = self._create_data_volume_for_container(provider_node, size, provider_location)
+                provider_hybrid_volume = self._create_data_volume_for_container(size, volume_name, provider_location, image_id)
                 try:
                     self._wait_for_volume_is_available(provider_hybrid_volume)
                 except Exception, e:
@@ -1477,17 +1507,6 @@ class AwsEc2Driver(driver.ComputeDriver):
                 break
         return root_bdm
 
-    def _create_data_volume_for_container(self, provider_node, size, provider_location):
-        LOG.info('start to create volume')
-        volume_name = provider_node.id
-        provider_hybrid_volume = self.compute_adapter.create_volume(size, volume_name, provider_location)
-        if not provider_hybrid_volume:
-            error_info = 'provider_hybrid_volume is None, release resource and return'
-            raise error_info
-        #self._wait_for_volume_available(provider_hybrid_volume)
-        LOG.info('end to create volume: %s' % provider_hybrid_volume)
-
-        return provider_hybrid_volume
 
     def _create_node_ec2(self, context, instance, image_meta, injected_files,
                                         admin_password, network_info, block_device_info):
