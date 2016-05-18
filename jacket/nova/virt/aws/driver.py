@@ -33,10 +33,11 @@ from wormholeclient import constants as wormhole_constants
 import traceback
 import adapter
 import exception_ex
-from nova.virt.aws import image_utils
+from nova.image import image_utils
 
-from jacketstatuscache.awssynchronizer import HCAWSS
-from jacketstatuscache.jacketcache import JacketStatusCache
+#miss ca certificate
+#from nova.virt.aws.statuscache.awssynchronizer import HCAWSS
+#from nova.virt.aws.statuscache.jacketcache import JacketStatusCache
 
 
 hybrid_cloud_opts = [
@@ -295,10 +296,10 @@ class AwsEc2Driver(driver.ComputeDriver):
             else:
                 self.provider_security_group_id = CONF.provider_opts.security_group
 
-        hcawss = HCAWSS(CONF.provider_opts.access_key_id,
-                        secret=CONF.provider_opts.secret_key,
-                        region=CONF.provider_opts.region, secure=False)
-        self.cache = JacketStatusCache(hcawss)
+        #hcawss = HCAWSS(CONF.provider_opts.access_key_id,
+        #                secret=CONF.provider_opts.secret_key,
+        #                region=CONF.provider_opts.region, secure=False)
+        #self.cache = JacketStatusCache(hcawss)
 
     def _get_auth(self, key_data, key_name):
         return None
@@ -2284,7 +2285,8 @@ class AwsEc2Driver(driver.ComputeDriver):
         provider_node_id = self._get_provider_node_id(instance)
 
         if provider_node_id:
-            state = self.cache.query_status(provider_node_id)
+            #state = self.cache.query_status(provider_node_id)
+            state = power_state.RUNNING
         if state:
             LOG.debug('end get the instance %s info ,provider node is %s ' % (instance.uuid, provider_node_id))
 

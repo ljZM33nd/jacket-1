@@ -1,11 +1,11 @@
 # -*- coding:utf-8 -*-
-
-from pyvcloud.schema.vcd.v1_5.schemas.vcloud import sessionType, queryRecordViewType
+import base64
 import requests
 from urllib import *
-import power_state
-import base64
 import log as logger
+
+from nova.compute import power_state
+from pyvcloud.schema.vcd.v1_5.schemas.vcloud import sessionType, queryRecordViewType
 
 status_dict_vapp_to_instance = {
     "FAILED_CREATION": power_state.CRASHED,
@@ -30,8 +30,6 @@ status_dict_vapp_to_instance = {
     "VAPP_UNDEPLOYED": power_state.NOSTATE,
     "VAPP_PARTIALLY_DEPLOYED": power_state.NOSTATE
 }
-
-
 class HCVCS(object):
     def __init__(self, host, username, org, password,
                  version="5.5", scheme="https", verify=False):

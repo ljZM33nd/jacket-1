@@ -1,12 +1,12 @@
-
+from nova.compute import power_state
 from nova.virt.aws import adapter
 
 AWS_POWER_STATE={
-    RUNNING:power_state.RUNNING,
-    TERMINATED:power_state.CRASHED,
-    PENDING:power_state.NOSTATE,
-    UNKNOWN:power_state.NOSTATE,
-    STOPPED:power_state.SHUTDOWN,
+    "RUNNING":power_state.RUNNING,
+    "TERMINATED":power_state.CRASHED,
+    "PENDING":power_state.NOSTATE,
+    "UNKNOWN":power_state.NOSTATE,
+    "STOPPED":power_state.SHUTDOWN,
 }
 
 class HCAWSS(object):

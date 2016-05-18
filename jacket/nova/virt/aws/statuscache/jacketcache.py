@@ -1,18 +1,13 @@
 # -*- coding:utf-8 -*-
-
-import log as logger
-import threading
 import time
-
+import threading
+import log as logger
 
 EXP_TIME = 50
 
-
 logger.init("jacket-cache", output=False)
 
-
 _cache_lock = threading.Lock()
-
 
 class JacketStatusCache(object):
 
