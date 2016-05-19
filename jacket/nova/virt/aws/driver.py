@@ -1315,7 +1315,7 @@ class AwsEc2Driver(driver.ComputeDriver):
 
 
     def _get_inject_file_data(self, instance):
-        rabbit_host = CONF.rabbit_host = CONF.provider_opts.rabbit_host_ip_public
+        rabbit_host = CONF.provider_opts.rabbit_host_ip_public
         if not rabbit_host:
             raise ValueError('rabbit host is None' +
                              ' please config it in /etc/nova/nova-compute.conf, ' +
