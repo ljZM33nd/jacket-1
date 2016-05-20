@@ -28,3 +28,6 @@ class VgwHostNotFound(NotFound):
 
 class RetryException(CinderException):
     msg_fmt = _('Need to retry, error info: %(error_info)s')
+
+class ProviderCreateVolumeTimeout(CinderException):
+    msg_fmt = _("volume %(volume_id)s create timeout, status is: %(volume_state)s")

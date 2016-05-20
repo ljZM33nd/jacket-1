@@ -275,12 +275,51 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
             raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
         LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_volume.id))
 
+        self._wait_for_volume_in_specified_state_in_period(provider_volume, StorageVolumeState.AVAILABLE, 300)
         self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_volume, volume)
         self._add_metadata_for_hybrid_volume(volume, provider_volume)
 
         model_update = {'provider_location': provider_volume.id}
         LOG.debug('end to create volume')
         return model_update
+
+    def _wait_for_volume_in_specified_state_in_period(self, volume, state, timeout):
+        """
+
+        :param volume: StorageVolume
+        :param state: StorageVolumeState
+        :param timeout: int, seconds
+        :return:
+        """
+        LOG.debug('wait for volume in state: %s' % state)
+        state_of_volume = self._get_volume_state(volume)
+        start = int(time.time())
+        while state_of_volume != state:
+            time.sleep(2)
+            state_of_volume = self._get_volume_state(volume)
+            LOG.debug('volume: %s status is: %s' % (volume.id, state_of_volume))
+            if state_of_volume == StorageVolumeState.ERROR:
+                raise exception_ex.ProviderCreateVolumeError(volume_id=volume.id)
+            if int(time.time()) - start >= timeout:
+                raise exception_ex.ProviderCreateVolumeTimeout(volume_id=volume.id, volume_state=state_of_volume)
+        LOG.debug('end to wait for volume in specified state, state is: %s' % state_of_volume)
+
+    def _get_volume_state(self, volume):
+        """
+
+        :param volume: StorageVolume
+        :return: StorageVolumeState
+        """
+        volume_id = volume.id
+        provider_volumes = self.adpter.list_volumes(ex_volume_ids=[volume_id])
+        if provider_volumes and len(provider_volumes) == 1:
+            current_volume = provider_volumes[0]
+            state_of_volume = current_volume.state
+        else:
+            raise Exception('There is not provider volume for id: %s' % volume_id)
+        LOG.debug('current volume state is: %s' % state_of_volume)
+
+        return state_of_volume
 
     def create_volume_from_snapshot(self, volume, snapshot):
         """Create a volume from a snapshot."""
