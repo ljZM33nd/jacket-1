@@ -335,6 +335,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
                 raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
             LOG.info("create volume: %s; provider_volume: %s " % (volume['id'], provider_volume.id))
 
+            self._wait_for_volume_in_specified_state_in_period(provider_volume, StorageVolumeState.AVAILABLE, 300)
             self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_volume, volume)
             self._add_metadata_for_hybrid_volume(volume, provider_volume)
         else:
@@ -407,7 +408,7 @@ class AwsEc2VolumeDriver(driver.VolumeDriver):
         if not provider_new_volume:
             raise exception_ex.ProviderCreateVolumeError(volume_id=volume['id'])
         LOG.info("created new provider volume: %s for new hybrid volume: %s " % (provider_new_volume.id, volume['id']))
-
+        self._wait_for_volume_in_specified_state_in_period(provider_new_volume, StorageVolumeState.AVAILABLE, 300)
         self._tag_provider_volume_with_hybrid_cloud_volume_id(provider_new_volume, volume)
         self._add_metadata_for_hybrid_volume(volume, provider_new_volume)
 
