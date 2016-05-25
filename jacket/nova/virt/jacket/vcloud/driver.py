@@ -1121,16 +1121,16 @@ class VCloudDriver(driver.ComputeDriver):
                           {'disk_name': vcloud_volume_name,
                            'disk_href': disk_ref.href})
 
+                if self._vcloud_client.detach_disk_from_vm(vapp_name, disk_ref):
+                    LOG.info("Volume %(volume_name)s detached from: %(instance_name)s",
+                            {'volume_name': vcloud_volume_name,
+                            'instance_name': instance_name})
+
                 if instance.system_metadata.get('image_container_format') == constants.HYBRID_VM \
                         and self._instance_is_active(instance):
                     vapp_ip = self.get_vapp_ip(vapp_name)
                     client = Client(vapp_ip, port = CONF.vcloud.hybrid_service_port)
                     client.detach_volume(volume_id)
-
-                if self._vcloud_client.detach_disk_from_vm(vapp_name, disk_ref):
-                    LOG.info("Volume %(volume_name)s detached from: %(instance_name)s",
-                            {'volume_name': vcloud_volume_name,
-                            'instance_name': instance_name})
             else:
                 msg = _('Unable to find volume  %s from instance') % vcloud_volume_name
                 LOG.error(msg)
