@@ -1039,8 +1039,11 @@ class VCloudDriver(driver.ComputeDriver):
                     LOG.debug('volume_name %s ndevs: %s', vcloud_volume_name, ndevs)
 
                     devs = ndevs - odevs
-                    for dev in devs:
+                    for dev in devs or list(ndevs)[-1:]:
                         client.attach_volume(volume_id, dev, mountpoint)
+
+                    if not devs: 
+                        LOG.warn('attach volume: old volumes==new volumes')
 
                     LOG.debug ('attach volume successful')
             else:
