@@ -141,7 +141,7 @@ class VCloudClient(object):
             if vapp_status == expected_vapp_status:
                 return the_vapp
 
-            task_stop = self._invoke_vapp_api(the_vapp, "undeploy")
+            task_stop = self._invoke_vapp_api(the_vapp, "shutdown")
             if not task_stop:
                 raise exceptions.NoneException(
                     "power off vapp failed, task")
