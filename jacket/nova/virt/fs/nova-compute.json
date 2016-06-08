@@ -1,0 +1,25 @@
+{
+
+    "provider_opts":{
+        "availability_zone" : "az01.sz--fusionsphere",
+        "base_linux_image" : "",
+        "net_api" : "752ef51c-409b-4fc0-abfc-64bf84209244",
+        "net_data" : "fddea44d-4c37-4f71-a539-53189691fc81",
+        "flavor_map" : "",
+        "security_groups" : "64e30882-713e-4155-87ca-2ce0808c890a"
+    },
+    "hybrid_cloud_agent_opts" : {
+      "tunnel_cidr" : "172.28.48.0/20",
+      "route_gw" : "172.28.48.1",
+      "personality_path" : "/home/neutron_agent_conf.txt",
+      "rabbit_host_ip" : "172.28.48.4",
+      "rabbit_host_user_id" : "rabbit",
+      "rabbit_host_user_password" : "FusionSphere123"
+    },
+  "DEFAULT":
+  {
+    "compute_driver": "nova.virt.fs.driver.FsComputeDriver",
+    "compute_driver": "nova.huawei.virt.libvirt.LibvirtDriver"
+  }
+}
+
