@@ -9,18 +9,67 @@ from cinder.volume.api import API as cinder_api
 
 
 LOG = logging.getLogger(__name__)
-provider_opts = [
-    cfg.StrOpt('availability_zone',  help='the availability_zone for connection to fs')]
+fs_backend_opts = [
+    cfg.StrOpt('availability_zone',  help='the availability_zone for connection to fs'),
+    cfg.StrOpt('user', help=''), cfg.StrOpt('tenant', help=''), cfg.StrOpt('pwd', help=''),
+    cfg.StrOpt('auth_url', help=''), cfg.StrOpt('region', help='')]
 CONF = cfg.CONF
-CONF.register_opts(provider_opts, 'provider_opts')
+CONF.register_opts(fs_backend_opts, 'fs_backend')
 
 
 class FSVolumeDriver(driver.VolumeDriver):
     VERSION = "1.0"
 
     def __init__(self, *args, **kwargs):
-        super(FSVolumeDriver, self).__init__( *args, **kwargs)
-        self.PROVIDER_AVAILABILITY_ZONE = CONF.provider_opts.availability_zone
+        super(FSVolumeDriver, self).__init__(*args, **kwargs)
+        self.PROVIDER_AVAILABILITY_ZONE = CONF.fs_backend.availability_zone
+        self.USER = CONF.fs_backend.user
+        self.TENANT = CONF.fs_backend.tenant
+        self.OS_AUTH_URL = CONF.fs_backend.auth_url
+        self.PWD = CONF.fs_backend.pwd
+        self.REGION = CONF.fs_backend.region
+        LOG.debug('user: %s, tenant: %s, pwd: %s' % (self.USER, self.TENANT, self.PWD))
+
+    def _get_sub_service_of_project_by_context(self, context):
+        user, pwd, auth_url, tenant, region = self._get_auth_info_from_context(context)
+
+        return OpenstackService(user=user, pwd=pwd, auth_url=auth_url, tenant=tenant, region=region)
+
+    def _get_auth_info_from_context(self, context):
+        #TODO
+        user = self.USER
+        pwd = self.PWD
+        auth_url = self.OS_AUTH_URL
+        tenant = self.TENANT
+        region = self.REGION
+        return user, pwd, auth_url, tenant, region
+
+    def _get_sub_service_of_project(self, project_id):
+        user, pwd, auth_url, tenant, region = self._get_auth_info_from_project(project_id)
+
+        return OpenstackService(user=user, pwd=pwd, auth_url=auth_url, tenant=tenant, region=region)
+
+    def _get_auth_info_from_project(self, project_id):
+        #TODO
+        user = self.USER
+        pwd = self.PWD
+        auth_url = self.OS_AUTH_URL
+        tenant = self.TENANT
+        region = self.REGION
+        return user, pwd, auth_url, tenant, region
+
+    def _get_sub_project_id(self, project_id):
+        #TODO
+        openstack = self._get_sub_service_of_admin()
+        tenant_name = self.TENANT
+        if not tenant_name:
+            tenant_name = None
+        sub_fs_project_id = openstack.keystone_service.get_tenant_id_by_tenant_name(tenant_name)
+
+        return sub_fs_project_id
+
+    def _get_sub_service_of_admin(self):
+        return OpenstackService()
 
     def check_for_setup_error(self):
         """Check configuration file."""
@@ -29,8 +78,9 @@ class FSVolumeDriver(driver.VolumeDriver):
     def copy_image_to_volume(self, context, volume, image_service, image_id):
         LOG.debug('dir volume: %s' % dir(volume))
         LOG.debug('volume: %s' % volume)
-        openstack_service = OpenstackService()
-        sub_fs_project_id = openstack_service.keystone_service.get_tenant_id_by_tenant_name()
+        project_id = volume.project_id
+        openstack_service = self._get_sub_service_of_project(project_id)
+        sub_fs_project_id = self._get_sub_project_id(project_id)
         LOG.debug('sub_fs_project_id: %s' % sub_fs_project_id)
         size = volume.size
         LOG.debug('size: %s' % size)
@@ -103,7 +153,8 @@ class FSVolumeDriver(driver.VolumeDriver):
         LOG.debug('start to create volume')
         LOG.debug('volume glance image metadata: %s' % volume.volume_glance_metadata)
         if volume.get('image_id') is None:
-            openstack = OpenstackService()
+            project_id = volume.project_id
+            openstack_service = self._get_sub_service_of_project(project_id)
             sub_volume_name = self._get_sub_fs_volume_name(volume.display_name, volume.id)
             LOG.debug('sub_volume_name: %s' % sub_volume_name)
             description = volume.display_description
@@ -119,9 +170,10 @@ class FSVolumeDriver(driver.VolumeDriver):
                 volume_type_name = volume_type_obj.name
             else:
                 volume_type_name = None
-            sub_fs_project_id = openstack.keystone_service.get_tenant_id_by_tenant_name()
+
+            sub_fs_project_id = self._get_sub_project_id(project_id)
             LOG.debug('sub_fs_project_id: %s' % sub_fs_project_id)
-            sub_volume = openstack.cinder_service.volume_create(size=size,
+            sub_volume = openstack_service.cinder_service.volume_create(size=size,
                                                                 display_name=sub_volume_name,
                                                                 display_description=description,
                                                                 volume_type=volume_type_name,
@@ -130,7 +182,7 @@ class FSVolumeDriver(driver.VolumeDriver):
                                                                 shareable=shareable)
             LOG.debug('submit create-volume task to sub fs. sub volume id: %s' % sub_volume.id)
             LOG.debug('start to wait for volume %s in status available' % sub_volume.id)
-            openstack.cinder_service.wait_for_volume_in_specified_status(sub_volume.id, 'available', 600)
+            openstack_service.cinder_service.wait_for_volume_in_specified_status(sub_volume.id, 'available', 600)
             LOG.debug('create volume %s success.' % volume.id)
 
         LOG.debug('end to create volume')
@@ -145,7 +197,8 @@ class FSVolumeDriver(driver.VolumeDriver):
         pass
 
     def delete_volume(self, volume):
-        openstack = OpenstackService()
+        project_id = volume.project_id
+        openstack = self._get_sub_service_of_project(project_id)
         sub_volume_name = self._get_sub_fs_volume_name(volume.display_name, volume.id)
         LOG.debug('sub_volume_name: %s' % sub_volume_name)
         sub_volume = openstack.cinder_service.get_sub_volume_by_name(sub_volume_name)
