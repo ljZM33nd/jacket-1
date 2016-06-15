@@ -678,16 +678,18 @@ class FsComputeDriver(driver.ComputeDriver):
                 try:
                     sub_image = openstack_service.glance_service.get_sub_image_by_image_name(sub_image_name)
                     if sub_image:
-                        image_ref = sub_image.id
-                        LOG.debug('sub image is: %s' %image_ref )
+                        image_ref = sub_image
+                        LOG.debug('sub image is: %s' % image_ref)
                     else:
-                        image_ref = CONF.provider_opts.base_linux_image
+                        image_id = CONF.provider_opts.base_linux_image
+                        image_ref = openstack_service.glance_service.image_get(image_id)
                         LOG.debug('No sub image exit mapping for image: %s, so use default: %s instead' %
                                   (instance.image_ref, image_ref))
                 except Exception, e:
                     LOG.warning('exception occur when get image for %s, use default base image instead.' %
                                 instance.image_ref)
-                    image_ref = CONF.provider_opts.base_linux_image
+                    image_id = CONF.provider_opts.base_linux_image
+                    image_ref = openstack_service.glance_service.image_get(image_id)
                     LOG.debug('No sub image exit mapping for image: %s, so use default: %s instead' %
                               (instance.image_ref, image_ref))
                 LOG.debug('image_ref: %s' % image_ref)
@@ -702,7 +704,8 @@ class FsComputeDriver(driver.ComputeDriver):
 
             agent_inject_files = self._get_agent_inject_file(instance, injected_files)
 
-            sub_bdm = self._transfer_to_sub_block_device_mapping_v2(block_device_info)
+            sub_bdm = self._transfer_to_sub_block_device_mapping_v2(block_device_info, openstack_service)
+            LOG.debug('sub_bdm: %s' % sub_bdm)
 
             provider_server = server_client.create_server(name, image_ref, flavor.flavorid, meta=metadata,
                                         files=agent_inject_files, reservation_id=instance.reservation_id,
@@ -806,7 +809,6 @@ class FsComputeDriver(driver.ComputeDriver):
                     bdm_info_dict['source_type'] = 'volume'
                     bdm_info_dict['destination_type'] = 'volume'
                     bdm_info_dict['delete_on_termination'] = str(delete_on_termination)
-
                 else:
                     #TODO: need to support snapshot id
                     continue
