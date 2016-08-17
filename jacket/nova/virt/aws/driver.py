@@ -231,7 +231,7 @@ class RetryDecorator(object):
                     try:
                         return f(*args, **kwargs)
                     except self._exceptions as e:
-                        LOG.error('retry times: %s, exception: %s' %
+                        LOG.debug('retry times: %s, exception: %s' %
                                   (str(self._max_retry_count - max_retries), traceback.format_exc(e)))
                         time.sleep(mdelay)
                         max_retries -= 1
@@ -1697,13 +1697,13 @@ class AwsEc2Driver(driver.ComputeDriver):
                                   block_device_info=None):
         pass
 
-    def _import_volume_from_glance(self, context, volume_id,instance, volume_loc):
+    def _import_volume_from_glance(self, context, volume_id, instance, volume_loc):
         LOG.debug('start to import volume from glance')
         volume = self.cinder_api.get(context,volume_id)
         image_meta = volume.get('volume_image_metadata')
         if not image_meta:
             LOG.error('Provider Volume NOT Found!')
-            exception_ex.VolumeNotFoundAtProvider
+            raise exception_ex.VolumeNotFoundAtProvider
         else:
             # 1.1 download qcow2 file from glance
             image_uuid = self._get_image_id_from_meta(image_meta)
@@ -2628,6 +2628,8 @@ class AwsEc2Driver(driver.ComputeDriver):
     def power_on(self, context, instance, network_info,
                  block_device_info=None):
         LOG.debug('Power on node %s',instance.uuid)
+        LOG.debug('context: %s, instance: %s, network_info: %s, block_device_info: %s' %
+                  (context, instance, network_info, block_device_info))
         # start server of aws
         node = self._get_provider_node(instance)
         if node:
@@ -2783,8 +2785,9 @@ class AwsEc2Driver(driver.ComputeDriver):
     def _hyper_create_container_task(self, clients, image_name, image_uuid, injected_files, admin_password,
                                      network_info, block_device_info):
         LOG.info('start to submit task for creating container.')
-        LOG.debug('admin_password: %s' % admin_password)
-        LOG.debug('injected_files: %s' % injected_files)
+        LOG.debug('image_name: %s, image_uuid: %s, injected_files: %s, admin_password: %s, '
+                  'network_info: %s, block_device_info: %s') % (
+        image_name, image_uuid, injected_files, admin_password, network_info, block_device_info)
         created_task = None
         tmp_exception = Exception('empty for creating container')
         for client in clients:
@@ -2816,19 +2819,17 @@ class AwsEc2Driver(driver.ComputeDriver):
             LOG.debug('task is DOING, status: %s' % task_code)
             raise exception_ex.RetryException(error_info='task status is: %s' % task_code)
         elif wormhole_constants.TASK_ERROR == task_code:
-            LOG.debug('task is ERROR, status: %s' % task_code)
+            LOG.debug('task is ERROR, status: %s, task: %s' % (task_code, current_task))
             raise Exception('task error, task status is: %s' % task_code)
         elif wormhole_constants.TASK_SUCCESS == task_code:
             LOG.debug('task is SUCCESS, status: %s' % task_code)
             task_finish = True
         else:
-            raise Exception('UNKNOW ERROR, task status: %s' % task_code)
+            raise Exception('UNKNOW ERROR, task status: %s, task: %s' % (task_code, current_task))
 
-        LOG.debug('task: %s is finished' % task )
+        LOG.debug('task: %s is finished' % current_task )
 
         return task_finish
-
-
 
     @RetryDecorator(max_retry_count=MAX_RETRY_COUNT, inc_sleep_time=5, max_sleep_time=60, exceptions=(
     errors.APIError, errors.NotFound, errors.ConnectionError, errors.InternalError, Exception))
